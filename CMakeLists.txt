@@ -49,6 +49,8 @@ set(LIBFUZZER_HEADERS
   FuzzerValueBitMap.h)
 
 include_directories(../../include)
+include_directories(third-party/cpp-httplib)
+include_directories(third-party/json/include)
 
 CHECK_CXX_SOURCE_COMPILES("
   static thread_local int blah;

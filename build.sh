@@ -1,12 +1,19 @@
 #!/bin/sh
-LIBFUZZER_SRC_DIR=$(dirname $0)
-CXX="${CXX:-clang}"
-for f in $LIBFUZZER_SRC_DIR/*.cpp; do
-  $CXX -g -O2 -fno-omit-frame-pointer  -stdlib=libc++ -std=c++11 $f -c &
+# LIBFUZZER_SRC_DIR=$(dirname $0)
+# CXX="${CXX:-clang}"
+# for f in $LIBFUZZER_SRC_DIR/*.cpp; do
+#   $CXX -g -O2 -fno-omit-frame-pointer  -stdlib=libc++ -std=c++11 $f -c &
  
-done
-wait
-rm -f libFuzzer.a
-ar r libFuzzer.a Fuzzer*.o
-rm -f Fuzzer*.o
+# done
+# wait
+# rm -f libFuzzer.a
+# ar r libFuzzer.a Fuzzer*.o
+# rm -f Fuzzer*.o
+
+mkdir -p build
+rm -rf build/*
+cd build
+
+cmake .. --project-file CMakeLists-self.txt 
+make -j4
 

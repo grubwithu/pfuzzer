@@ -16,6 +16,8 @@
 #include "FuzzerSHA1.h"
 #include "FuzzerTracePC.h"
 #include "FuzzerUtil.h"
+#include "httplib.h"
+#include "nlohmann/json.hpp"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -134,6 +136,29 @@ struct GlobalEnv {
       NumRuns += Stats.number_of_executed_units;
     }
     std::string LocalCorpusDir = GetLocalCorpusDir(Job->CorpusDir, Job->FuzzerName);
+    
+    using json = nlohmann::json;
+    auto HfcUrl = getenv("HFC_URL");
+
+    if (HfcUrl) {
+      httplib::Client Client(HfcUrl);
+      json Body = {
+        {"fuzzer", Job->FuzzerName},
+        {"identity", Job->FuzzerName},
+        {"corpus", {LocalCorpusDir}},
+      };
+      auto Res = Client.Post("/merge", Body.dump(), "application/json");
+      if (Res) {
+        if (Res->status == 200) {
+          auto JsonRes = json::parse(Res->body);
+          auto TaskId = JsonRes["data"]["task_id"];
+          std::cout << "Merge Job " << Job->JobId << " with TaskId " << TaskId << std::endl;
+        }
+      }
+    }
+
+    
+
     std::vector<SizedFile> LocalCorpusSeeds;
     GetSizedFilesFromDir(LocalCorpusDir, &LocalCorpusSeeds);
     //std::sort(LocalCorpusSeeds.begin(), LocalCorpusSeeds.end());
