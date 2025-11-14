@@ -147,7 +147,7 @@ struct GlobalEnv {
         {"identity", Job->FuzzerName},
         {"corpus", {LocalCorpusDir}},
       };
-      auto Res = Client.Post("/merge", Body.dump(), "application/json");
+      auto Res = Client.Post("/reportCorpus", Body.dump(), "application/json");
       if (Res) {
         if (Res->status == 200) {
           auto JsonRes = json::parse(Res->body);
