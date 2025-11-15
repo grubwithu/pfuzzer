@@ -104,9 +104,8 @@ bool ExecuteCommand(const Command &Cmd, std::string *CmdOutput) {
 }
 
 void SetTimer(int Seconds) {
-  struct itimerval T {
-    {Seconds, 0}, { Seconds, 0 }
-  };
+  struct itimerval T{
+      {Seconds, 0}, {Seconds, 0}};
   if (setitimer(ITIMER_REAL, &T, nullptr)) {
     Printf("libFuzzer: setitimer failed with %d\n", errno);
     exit(1);
@@ -114,7 +113,7 @@ void SetTimer(int Seconds) {
   SetSigaction(SIGALRM, AlarmHandler);
 }
 
-void SetSignalHandler(const FuzzingOptions& Options) {
+void SetSignalHandler(const FuzzingOptions &Options) {
   // setitimer is not implemented in emscripten.
   if (Options.HandleAlrm && Options.UnitTimeoutSec > 0 && !LIBFUZZER_EMSCRIPTEN)
     SetTimer(Options.UnitTimeoutSec / 2 + 1);
@@ -188,6 +187,6 @@ size_t PageSize() {
   return PageSizeCached;
 }
 
-}  // namespace fuzzer
+} // namespace fuzzer
 
 #endif // LIBFUZZER_POSIX

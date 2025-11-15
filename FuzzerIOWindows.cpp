@@ -37,7 +37,7 @@ static bool IsFile(const std::string &Path, const DWORD &FileAttributes) {
 
   if (FileHandle == INVALID_HANDLE_VALUE) {
     Printf("CreateFileA() failed for \"%s\" (Error code: %lu).\n", Path.c_str(),
-        GetLastError());
+           GetLastError());
     return false;
   }
 
@@ -45,7 +45,7 @@ static bool IsFile(const std::string &Path, const DWORD &FileAttributes) {
 
   if (FileType == FILE_TYPE_UNKNOWN) {
     Printf("GetFileType() failed for \"%s\" (Error code: %lu).\n", Path.c_str(),
-        GetLastError());
+           GetLastError());
     CloseHandle(FileHandle);
     return false;
   }
@@ -64,7 +64,7 @@ bool IsFile(const std::string &Path) {
 
   if (Att == INVALID_FILE_ATTRIBUTES) {
     Printf("GetFileAttributesA() failed for \"%s\" (Error code: %lu).\n",
-        Path.c_str(), GetLastError());
+           Path.c_str(), GetLastError());
     return false;
   }
 
@@ -72,7 +72,8 @@ bool IsFile(const std::string &Path) {
 }
 
 static bool IsDir(DWORD FileAttrs) {
-  if (FileAttrs == INVALID_FILE_ATTRIBUTES) return false;
+  if (FileAttrs == INVALID_FILE_ATTRIBUTES)
+    return false;
   return FileAttrs & FILE_ATTRIBUTE_DIRECTORY;
 }
 
@@ -90,7 +91,8 @@ bool IsDirectory(const std::string &Path) {
 
 std::string Basename(const std::string &Path) {
   size_t Pos = Path.find_last_of("/\\");
-  if (Pos == std::string::npos) return Path;
+  if (Pos == std::string::npos)
+    return Path;
   assert(Pos < Path.size());
   return Path.substr(Pos + 1);
 }
@@ -114,19 +116,19 @@ void ListFilesInDirRecursive(const std::string &Dir, long *Epoch,
                              std::vector<std::string> *V, bool TopDir) {
   auto E = GetEpoch(Dir);
   if (Epoch)
-    if (E && *Epoch >= E) return;
+    if (E && *Epoch >= E)
+      return;
 
   std::string Path(Dir);
   assert(!Path.empty());
   if (Path.back() != '\\')
-      Path.push_back('\\');
+    Path.push_back('\\');
   Path.push_back('*');
 
   // Get the first directory entry.
   WIN32_FIND_DATAA FindInfo;
   HANDLE FindHandle(FindFirstFileA(Path.c_str(), &FindInfo));
-  if (FindHandle == INVALID_HANDLE_VALUE)
-  {
+  if (FindHandle == INVALID_HANDLE_VALUE) {
     if (GetLastError() == ERROR_FILE_NOT_FOUND)
       return;
     Printf("No such file or directory: %s; exiting\n", Dir.c_str());
@@ -140,12 +142,11 @@ void ListFilesInDirRecursive(const std::string &Dir, long *Epoch,
       size_t FilenameLen = strlen(FindInfo.cFileName);
       if ((FilenameLen == 1 && FindInfo.cFileName[0] == '.') ||
           (FilenameLen == 2 && FindInfo.cFileName[0] == '.' &&
-                               FindInfo.cFileName[1] == '.'))
+           FindInfo.cFileName[1] == '.'))
         continue;
 
       ListFilesInDirRecursive(FileName, Epoch, V, false);
-    }
-    else if (IsFile(FileName, FindInfo.dwFileAttributes))
+    } else if (IsFile(FileName, FindInfo.dwFileAttributes))
       V->push_back(FileName);
   } while (FindNextFileA(FindHandle, &FindInfo));
 
@@ -167,11 +168,13 @@ void IterateDirRecursive(const std::string &Dir,
   DirPreCallback(Dir);
 
   DWORD DirAttrs = GetFileAttributesA(Dir.c_str());
-  if (!IsDir(DirAttrs)) return;
+  if (!IsDir(DirAttrs))
+    return;
 
   std::string TargetDir(Dir);
   assert(!TargetDir.empty());
-  if (TargetDir.back() != '\\') TargetDir.push_back('\\');
+  if (TargetDir.back() != '\\')
+    TargetDir.push_back('\\');
   TargetDir.push_back('*');
 
   WIN32_FIND_DATAA FindInfo;
@@ -214,7 +217,7 @@ char GetSeparator() {
   return '\\';
 }
 
-FILE* OpenFile(int Fd, const char* Mode) {
+FILE *OpenFile(int Fd, const char *Mode) {
   return _fdopen(Fd, Mode);
 }
 
@@ -262,7 +265,7 @@ static size_t ParseDrive(const std::string &FileName, const size_t Offset,
 static size_t ParseFileName(const std::string &FileName, const size_t Offset) {
   size_t Pos = Offset;
   const size_t End = FileName.size();
-  for(; Pos < End && !IsSeparator(FileName[Pos]); ++Pos)
+  for (; Pos < End && !IsSeparator(FileName[Pos]); ++Pos)
     ;
   return Pos - Offset;
 }
@@ -274,7 +277,7 @@ static size_t ParseDir(const std::string &FileName, const size_t Offset) {
   const size_t End = FileName.size();
   if (Pos >= End || IsSeparator(FileName[Pos]))
     return 0;
-  for(; Pos < End && !IsSeparator(FileName[Pos]); ++Pos)
+  for (; Pos < End && !IsSeparator(FileName[Pos]); ++Pos)
     ;
   if (Pos >= End)
     return 0;
@@ -355,7 +358,7 @@ std::string DirName(const std::string &FileName) {
   }
 
   if (DirLen) {
-    --DirLen; // Remove trailing separator.
+    --DirLen;       // Remove trailing separator.
     if (!FileLen) { // Path ended in separator.
       assert(DirLen);
       // Remove file name from Dir.
@@ -402,13 +405,15 @@ void RawPrint(const char *Str) {
 }
 
 void MkDir(const std::string &Path) {
-  if (CreateDirectoryA(Path.c_str(), nullptr)) return;
+  if (CreateDirectoryA(Path.c_str(), nullptr))
+    return;
   Printf("CreateDirectoryA failed for %s (Error code: %lu).\n", Path.c_str(),
          GetLastError());
 }
 
 void RmDir(const std::string &Path) {
-  if (RemoveDirectoryA(Path.c_str())) return;
+  if (RemoveDirectoryA(Path.c_str()))
+    return;
   Printf("RemoveDirectoryA failed for %s (Error code: %lu).\n", Path.c_str(),
          GetLastError());
 }
@@ -418,6 +423,6 @@ const std::string &getDevNull() {
   return devNull;
 }
 
-}  // namespace fuzzer
+} // namespace fuzzer
 
 #endif // LIBFUZZER_WINDOWS

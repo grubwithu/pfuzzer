@@ -101,11 +101,10 @@ int ExecuteCommand(const Command &Cmd) {
   char **Environ = environ; // Read from global
   const char *CommandCStr = CmdLine.c_str();
   char *const Argv[] = {
-    strdup("sh"),
-    strdup("-c"),
-    strdup(CommandCStr),
-    NULL
-  };
+      strdup("sh"),
+      strdup("-c"),
+      strdup(CommandCStr),
+      NULL};
   int ErrorCode = 0, ProcessStatus = 0;
   // FIXME: We probably shouldn't hardcode the shell path.
   ErrorCode = posix_spawn(&Pid, "/bin/sh", NULL, &SpawnAttributes,
@@ -158,7 +157,7 @@ int ExecuteCommand(const Command &Cmd) {
 }
 
 void DiscardOutput(int Fd) {
-  FILE* Temp = fopen("/dev/null", "w");
+  FILE *Temp = fopen("/dev/null", "w");
   if (!Temp)
     return;
   dup2(fileno(Temp), Fd);

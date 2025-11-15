@@ -88,6 +88,6 @@ void CrashResistantMerge(const std::vector<std::string> &Args,
                          std::set<uint32_t> *NewCov, const std::string &CFPath,
                          bool Verbose, bool IsSetCoverMerge);
 
-}  // namespace fuzzer
+} // namespace fuzzer
 
-#endif  // LLVM_FUZZER_MERGE_H
+#endif // LLVM_FUZZER_MERGE_H

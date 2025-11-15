@@ -30,6 +30,21 @@
 
 namespace fuzzer {
 
+using json = nlohmann::json;
+static httplib::Client *GetHTTPClient() {
+  static httplib::Client *Client = nullptr;
+  if (!Client) {
+    auto HfcUrl = getenv("HFC_URL");
+    if (HfcUrl) {
+      Client = new httplib::Client(HfcUrl);
+    } else {
+      std::cerr << "HFC_URL is not set" << std::endl;
+      exit(1);
+    }
+  }
+  return Client;
+}
+
 
 struct GlobalEnv {
   std::vector<std::string> Args;
@@ -77,6 +92,28 @@ struct GlobalEnv {
     //GetJobType
     auto Job = new FuzzJob;
     Job->JobId = JobId;
+
+    // Get recommended function name from hfc.
+    auto& Client = *GetHTTPClient();
+    auto Res = Client.Get("/peekResult");
+    std::vector<ConstraintGroup> ConstraintGroups;
+    if (Res) {
+      if (Res->status != 200) {
+        std::cerr << "Recommend function failed: " << Res->body << std::endl;
+      }
+      auto JsonRes = json::parse(Res->body);
+      if (JsonRes.contains("constraint_groups")) {
+        for (auto &Group : JsonRes["constraint_groups"]) {
+          ConstraintGroup CGroup;
+          CGroup.GroupId = Group["group_id"];
+          CGroup.Function = Group["function"];
+          CGroup.Importance = Group["importance"];
+          CGroup.Paths = Group["paths"];
+          ConstraintGroups.push_back(CGroup);
+        }
+      }
+    }
+
     //加锁
     std::string FuzzerName;
     {
@@ -137,27 +174,20 @@ struct GlobalEnv {
     }
     std::string LocalCorpusDir = GetLocalCorpusDir(Job->CorpusDir, Job->FuzzerName);
     
-    using json = nlohmann::json;
-    auto HfcUrl = getenv("HFC_URL");
 
-    if (HfcUrl) {
-      httplib::Client Client(HfcUrl);
-      json Body = {
-        {"fuzzer", Job->FuzzerName},
-        {"identity", Job->FuzzerName},
-        {"corpus", {LocalCorpusDir}},
-      };
-      auto Res = Client.Post("/reportCorpus", Body.dump(), "application/json");
-      if (Res) {
-        if (Res->status == 200) {
-          auto JsonRes = json::parse(Res->body);
-          auto TaskId = JsonRes["data"]["task_id"];
-          std::cout << "Merge Job " << Job->JobId << " with TaskId " << TaskId << std::endl;
-        }
+    auto& Client = *GetHTTPClient();
+    json Body = {
+      {"fuzzer", Job->FuzzerName},
+      {"identity", Job->FuzzerName},
+      {"corpus", {LocalCorpusDir}},
+    };
+    auto Res = Client.Post("/reportCorpus", Body.dump(), "application/json");
+    if (Res) {
+      if (Res->status != 200) {
+        std::cerr << "Report corpus failed: " << Res->body << std::endl;
       }
     }
-
-    
+  
 
     std::vector<SizedFile> LocalCorpusSeeds;
     GetSizedFilesFromDir(LocalCorpusDir, &LocalCorpusSeeds);

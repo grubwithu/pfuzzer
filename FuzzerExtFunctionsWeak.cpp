@@ -12,7 +12,7 @@
 // to clients right now.
 //===----------------------------------------------------------------------===//
 #include "FuzzerPlatform.h"
-#if LIBFUZZER_LINUX || LIBFUZZER_NETBSD || LIBFUZZER_FUCHSIA ||                \
+#if LIBFUZZER_LINUX || LIBFUZZER_NETBSD || LIBFUZZER_FUCHSIA || \
     LIBFUZZER_FREEBSD || LIBFUZZER_EMSCRIPTEN
 
 #include "FuzzerExtFunctions.h"
@@ -20,7 +20,7 @@
 
 extern "C" {
 // Declare these symbols as weak to allow them to be optionally defined.
-#define EXT_FUNC(NAME, RETURN_TYPE, FUNC_SIG, WARN)                            \
+#define EXT_FUNC(NAME, RETURN_TYPE, FUNC_SIG, WARN) \
   __attribute__((weak, visibility("default"))) RETURN_TYPE NAME FUNC_SIG
 
 #include "FuzzerExtFunctions.def"
@@ -39,9 +39,9 @@ static void CheckFnPtr(void *FnPtr, const char *FnName, bool WarnIfMissing) {
 namespace fuzzer {
 
 ExternalFunctions::ExternalFunctions() {
-#define EXT_FUNC(NAME, RETURN_TYPE, FUNC_SIG, WARN)                            \
-  this->NAME = ::NAME;                                                         \
-  CheckFnPtr(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(::NAME)),    \
+#define EXT_FUNC(NAME, RETURN_TYPE, FUNC_SIG, WARN)                         \
+  this->NAME = ::NAME;                                                      \
+  CheckFnPtr(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(::NAME)), \
              #NAME, WARN);
 
 #include "FuzzerExtFunctions.def"

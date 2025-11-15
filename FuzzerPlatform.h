@@ -83,8 +83,8 @@
 #define __has_attribute(x) 0
 #endif
 
-#define LIBFUZZER_POSIX                                                        \
-  (LIBFUZZER_APPLE || LIBFUZZER_LINUX || LIBFUZZER_NETBSD ||                   \
+#define LIBFUZZER_POSIX                                      \
+  (LIBFUZZER_APPLE || LIBFUZZER_LINUX || LIBFUZZER_NETBSD || \
    LIBFUZZER_FREEBSD || LIBFUZZER_EMSCRIPTEN)
 
 #ifdef __x86_64
@@ -126,7 +126,7 @@
 #else
 #define ATTRIBUTE_ALIGNED(X) __attribute__((aligned(X)))
 #define ATTRIBUTE_INTERFACE __attribute__((visibility("default")))
-#define ATTRIBUTES_INTERFACE_TLS_INITIAL_EXEC                                  \
+#define ATTRIBUTES_INTERFACE_TLS_INITIAL_EXEC \
   ATTRIBUTE_INTERFACE __attribute__((tls_model("initial-exec"))) thread_local
 
 #define ATTRIBUTE_NOINLINE __attribute__((noinline))

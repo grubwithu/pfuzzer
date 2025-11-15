@@ -154,7 +154,7 @@ Fuzzer::Fuzzer(UserCallback CB, InputCorpus &Corpus, MutationDispatcher &MD,
   if (!Options.OutputCorpus.empty() && Options.ReloadIntervalSec)
     EpochOfLastReadOfOutputCorpus = GetEpoch(Options.OutputCorpus);
   MaxInputLen = MaxMutationLen = Options.MaxLen;
-  TmpMaxMutationLen = 0;  // Will be set once we load the corpus.
+  TmpMaxMutationLen = 0; // Will be set once we load the corpus.
   AllocateCurrentUnitData();
   CurrentUnitSize = 0;
   memset(BaseSha1, 0, sizeof(BaseSha1));
@@ -253,7 +253,8 @@ void Fuzzer::ExitCallback() {
 }
 
 void Fuzzer::MaybeExitGracefully() {
-  if (!F->GracefulExitRequested) return;
+  if (!F->GracefulExitRequested)
+    return;
   Printf("==%lu== INFO: libFuzzer: exiting as requested\n", GetPid());
   RmDirRecursive(TempPath("FuzzWithFork", ".dir"));
   F->PrintFinalStats();
@@ -460,7 +461,8 @@ void Fuzzer::PrintPulseAndReportSlowInput(const uint8_t *Data, size_t Size) {
 static void WriteFeatureSetToFile(const std::string &FeaturesDir,
                                   const std::string &FileName,
                                   const std::vector<uint32_t> &FeatureSet) {
-  if (FeaturesDir.empty() || FeatureSet.empty()) return;
+  if (FeaturesDir.empty() || FeatureSet.empty())
+    return;
   WriteToFile(reinterpret_cast<const uint8_t *>(FeatureSet.data()),
               FeatureSet.size() * sizeof(FeatureSet[0]),
               DirPlusFile(FeaturesDir, FileName));
@@ -469,7 +471,8 @@ static void WriteFeatureSetToFile(const std::string &FeaturesDir,
 static void RenameFeatureSetFile(const std::string &FeaturesDir,
                                  const std::string &OldFile,
                                  const std::string &NewFile) {
-  if (FeaturesDir.empty()) return;
+  if (FeaturesDir.empty())
+    return;
   RenameFile(DirPlusFile(FeaturesDir, OldFile),
              DirPlusFile(FeaturesDir, NewFile));
 }
@@ -513,7 +516,8 @@ bool Fuzzer::RunOne(const uint8_t *Data, size_t Size, bool MayDeleteFile,
   // Largest input length should be INT_MAX.
   assert(Size < std::numeric_limits<uint32_t>::max());
 
-  if(!ExecuteCallback(Data, Size)) return false;
+  if (!ExecuteCallback(Data, Size))
+    return false;
   auto TimeOfUnit = duration_cast<microseconds>(UnitStopTime - UnitStartTime);
 
   UniqFeatureSetTmp.clear();
@@ -768,7 +772,7 @@ void Fuzzer::MutateAndTestOne() {
                             /*DuringInitialCorpusExecution*/ false);
     if (NewCov) {
       ReportNewCoverage(&II, {CurrentUnitData, CurrentUnitData + Size});
-      break;  // We will mutate this input more in the next rounds.
+      break; // We will mutate this input more in the next rounds.
     }
     if (Options.ReduceDepth && !FoundUniqFeatures)
       break;
@@ -870,7 +874,7 @@ void Fuzzer::Loop(std::vector<SizedFile> &CorporaFiles) {
            MD.GetRand());
   TPC.SetFocusFunction(FocusFunctionOrAuto);
   ReadAndExecuteSeedCorpora(CorporaFiles);
-  DFT.Clear();  // No need for DFT any more.
+  DFT.Clear(); // No need for DFT any more.
   TPC.SetPrintNewPCs(Options.PrintNewCovPcs);
   TPC.SetPrintNewFuncs(Options.PrintNewCovFuncs);
   system_clock::time_point LastCorpusReload = system_clock::now();

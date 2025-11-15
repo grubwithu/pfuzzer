@@ -20,11 +20,12 @@
 #include <string>
 #include <vector>
 
-
 namespace fuzzer {
 
-template <class T> T Min(T a, T b) { return a < b ? a : b; }
-template <class T> T Max(T a, T b) { return a > b ? a : b; }
+template <class T>
+T Min(T a, T b) { return a < b ? a : b; }
+template <class T>
+T Max(T a, T b) { return a > b ? a : b; }
 
 class Random;
 class Dictionary;
@@ -50,6 +51,6 @@ void ClearExtraCounters();
 
 extern bool RunningUserCallback;
 
-}  // namespace fuzzer
+} // namespace fuzzer
 
-#endif  // LLVM_FUZZER_DEFS_H
+#endif // LLVM_FUZZER_DEFS_H

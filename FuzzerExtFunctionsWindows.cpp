@@ -37,8 +37,8 @@ using namespace fuzzer;
 
 // Declare external functions as having alternativenames, so that we can
 // determine if they are not defined.
-#define EXTERNAL_FUNC(Name, Default)                                           \
-  __pragma(comment(linker, "/alternatename:" WIN_SYM_PREFIX STRINGIFY(         \
+#define EXTERNAL_FUNC(Name, Default)                                   \
+  __pragma(comment(linker, "/alternatename:" WIN_SYM_PREFIX STRINGIFY( \
                                Name) "=" WIN_SYM_PREFIX STRINGIFY(Default)))
 
 extern "C" {
@@ -47,7 +47,8 @@ extern "C" {
     Printf("ERROR: Function \"%s\" not defined.\n", #NAME); \
     exit(1);                                                \
   }                                                         \
-  EXTERNAL_FUNC(NAME, NAME##Def) RETURN_TYPE NAME FUNC_SIG
+  EXTERNAL_FUNC(NAME, NAME##Def)                            \
+  RETURN_TYPE NAME FUNC_SIG
 
 #include "FuzzerExtFunctions.def"
 
@@ -68,9 +69,9 @@ static T *GetFnPtr(void *Fun, void *FunDef, const char *FnName,
 namespace fuzzer {
 
 ExternalFunctions::ExternalFunctions() {
-#define EXT_FUNC(NAME, RETURN_TYPE, FUNC_SIG, WARN)                            \
-  this->NAME = GetFnPtr<decltype(::NAME)>(GET_FUNCTION_ADDRESS(::NAME),        \
-                                          GET_FUNCTION_ADDRESS(::NAME##Def),   \
+#define EXT_FUNC(NAME, RETURN_TYPE, FUNC_SIG, WARN)                          \
+  this->NAME = GetFnPtr<decltype(::NAME)>(GET_FUNCTION_ADDRESS(::NAME),      \
+                                          GET_FUNCTION_ADDRESS(::NAME##Def), \
                                           #NAME, WARN);
 
 #include "FuzzerExtFunctions.def"
@@ -78,6 +79,6 @@ ExternalFunctions::ExternalFunctions() {
 #undef EXT_FUNC
 }
 
-}  // namespace fuzzer
+} // namespace fuzzer
 
 #endif // LIBFUZZER_WINDOWS

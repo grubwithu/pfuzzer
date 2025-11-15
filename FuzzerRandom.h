@@ -15,7 +15,7 @@
 
 namespace fuzzer {
 class Random : public std::minstd_rand {
- public:
+public:
   Random(unsigned int seed) : std::minstd_rand(seed) {}
   result_type operator()() { return this->std::minstd_rand::operator()(); }
   template <typename T>
@@ -42,6 +42,6 @@ class Random : public std::minstd_rand {
   }
 };
 
-}  // namespace fuzzer
+} // namespace fuzzer
 
-#endif  // LLVM_FUZZER_RANDOM_H
+#endif // LLVM_FUZZER_RANDOM_H

@@ -18,8 +18,8 @@
 #include <algorithm>
 #include <sstream>
 #include <string>
-#include <vector>
 #include <thread>
+#include <vector>
 
 namespace fuzzer {
 

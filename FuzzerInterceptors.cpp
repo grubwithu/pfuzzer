@@ -18,10 +18,11 @@
 #define PTR_TO_REAL(x) real_##x
 #define REAL(x) __interception::PTR_TO_REAL(x)
 #define FUNC_TYPE(x) x##_type
-#define DEFINE_REAL(ret_type, func, ...)                                       \
-  typedef ret_type (*FUNC_TYPE(func))(__VA_ARGS__);                            \
-  namespace __interception {                                                   \
-  FUNC_TYPE(func) PTR_TO_REAL(func);                                           \
+#define DEFINE_REAL(ret_type, func, ...)            \
+  typedef ret_type (*FUNC_TYPE(func))(__VA_ARGS__); \
+  namespace __interception {                        \
+  FUNC_TYPE(func)                                   \
+  PTR_TO_REAL(func);                                \
   }
 
 #include <cassert>

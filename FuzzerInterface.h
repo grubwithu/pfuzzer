@@ -23,7 +23,7 @@
 
 #ifdef __cplusplus
 extern "C" {
-#endif  // __cplusplus
+#endif // __cplusplus
 
 // Define FUZZER_INTERFACE_VISIBILITY to set default visibility in a way that
 // doesn't break MSVC.
@@ -73,7 +73,7 @@ LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize);
 #undef FUZZER_INTERFACE_VISIBILITY
 
 #ifdef __cplusplus
-}  // extern "C"
-#endif  // __cplusplus
+} // extern "C"
+#endif // __cplusplus
 
-#endif  // LLVM_FUZZER_INTERFACE_H
+#endif // LLVM_FUZZER_INTERFACE_H

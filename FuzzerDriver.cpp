@@ -24,10 +24,10 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <thread>
-#include <fstream>
 
 // This function should be present in the libFuzzer so that the client
 // binary can test for its existence.
@@ -40,7 +40,7 @@ extern "C" void __libfuzzer_is_present() {}
 #endif
 #else
 extern "C" __attribute__((used)) void __libfuzzer_is_present() {}
-#endif  // LIBFUZZER_MSVC
+#endif // LIBFUZZER_MSVC
 
 namespace fuzzer {
 
@@ -48,8 +48,8 @@ namespace fuzzer {
 struct FlagDescription {
   const char *Name;
   const char *Description;
-  int   Default;
-  int   *IntFlag;
+  int Default;
+  int *IntFlag;
   const char **StrFlag;
   unsigned int *UIntFlag;
 };
@@ -66,15 +66,15 @@ struct {
 #undef FUZZER_FLAG_STRING
 } Flags;
 
-static const FlagDescription FlagDescriptions [] {
-#define FUZZER_DEPRECATED_FLAG(Name)                                           \
+static const FlagDescription FlagDescriptions[]{
+#define FUZZER_DEPRECATED_FLAG(Name) \
   {#Name, "Deprecated; don't use", 0, nullptr, nullptr, nullptr},
-#define FUZZER_FLAG_INT(Name, Default, Description)                            \
+#define FUZZER_FLAG_INT(Name, Default, Description) \
   {#Name, Description, Default, &Flags.Name, nullptr, nullptr},
-#define FUZZER_FLAG_UNSIGNED(Name, Default, Description)                       \
-  {#Name,   Description, static_cast<int>(Default),                            \
+#define FUZZER_FLAG_UNSIGNED(Name, Default, Description) \
+  {#Name, Description, static_cast<int>(Default),        \
    nullptr, nullptr, &Flags.Name},
-#define FUZZER_FLAG_STRING(Name, Description)                                  \
+#define FUZZER_FLAG_STRING(Name, Description) \
   {#Name, Description, 0, nullptr, &Flags.Name, nullptr},
 #include "FuzzerFlags.def"
 #undef FUZZER_DEPRECATED_FLAG
@@ -105,7 +105,8 @@ static void PrintHelp() {
 
   for (size_t F = 0; F < kNumFlags; F++) {
     const auto &D = FlagDescriptions[F];
-    if (strstr(D.Description, "internal flag") == D.Description) continue;
+    if (strstr(D.Description, "internal flag") == D.Description)
+      continue;
     Printf(" %s", D.Name);
     for (size_t i = 0, n = MaxFlagLen - strlen(D.Name); i < n; i++)
       Printf(" ");
@@ -113,14 +114,14 @@ static void PrintHelp() {
     Printf("%d\t%s\n", D.Default, D.Description);
   }
   Printf("\nFlags starting with '--' will be ignored and "
-            "will be passed verbatim to subprocesses.\n");
+         "will be passed verbatim to subprocesses.\n");
 }
 
 static const char *FlagValue(const char *Param, const char *Name) {
   size_t Len = strlen(Name);
   if (Param[0] == '-' && strstr(Param + 1, Name) == Param + 1 &&
       Param[Len + 1] == '=')
-      return &Param[Len + 2];
+    return &Param[Len + 2];
   return nullptr;
 }
 
@@ -142,7 +143,8 @@ static long MyStol(const char *Str) {
 }
 
 static bool ParseOneFlag(const char *Param) {
-  if (Param[0] != '-') return false;
+  if (Param[0] != '-')
+    return false;
   if (Param[1] == '-') {
     static bool PrintedWarning = false;
     if (!PrintedWarning) {
@@ -157,7 +159,7 @@ static bool ParseOneFlag(const char *Param) {
   for (size_t F = 0; F < kNumFlags; F++) {
     const char *Name = FlagDescriptions[F].Name;
     const char *Str = FlagValue(Param, Name);
-    if (Str)  {
+    if (Str) {
       if (FlagDescriptions[F].IntFlag) {
         auto Val = MyStol(Str);
         *FlagDescriptions[F].IntFlag = static_cast<int>(Val);
@@ -175,14 +177,15 @@ static bool ParseOneFlag(const char *Param) {
         if (Flags.verbosity >= 2)
           Printf("Flag: %s %s\n", Name, Str);
         return true;
-      } else {  // Deprecated flag.
+      } else { // Deprecated flag.
         Printf("Flag: %s: deprecated, don't use\n", Name);
         return true;
       }
     }
   }
   Printf("\n\nWARNING: unrecognized flag '%s'; "
-         "use -help=1 to list all flags\n\n", Param);
+         "use -help=1 to list all flags\n\n",
+         Param);
   return true;
 }
 
@@ -203,7 +206,8 @@ static void ParseFlags(const std::vector<std::string> &Args,
   if (EF->LLVMFuzzerCustomMutator) {
     Flags.len_control = 0;
     Printf("INFO: found LLVMFuzzerCustomMutator (%p). "
-           "Disabling -len_control by default.\n", EF->LLVMFuzzerCustomMutator);
+           "Disabling -len_control by default.\n",
+           EF->LLVMFuzzerCustomMutator);
   }
 
   Inputs = new std::vector<std::string>;
@@ -232,7 +236,8 @@ static void WorkerThread(const Command &BaseCmd, std::atomic<unsigned> *Counter,
   ScopedDisableMsanInterceptorChecks S;
   while (true) {
     unsigned C = (*Counter)++;
-    if (C >= NumJobs) break;
+    if (C >= NumJobs)
+      break;
     std::string Log = "fuzz-" + std::to_string(C) + ".log";
     Command Cmd(BaseCmd);
     Cmd.setOutputFile(Log);
@@ -297,7 +302,7 @@ static int RunInMultipleProcesses(const std::vector<std::string> &Args,
   V.resize(NumWorkers);
   for (unsigned i = 0; i < NumWorkers; i++) {
     V[i] = std::thread(WorkerThread, std::ref(Cmd), &Counter, NumJobs,
-                            &HasErrors);
+                       &HasErrors);
     SetThreadName(V[i], "FuzzerWorker");
   }
   for (auto &T : V)
@@ -336,7 +341,8 @@ int RunOneTest(Fuzzer *F, const char *InputFilePath, size_t MaxLen) {
 }
 
 static bool AllInputsAreFiles() {
-  if (Inputs->empty()) return false;
+  if (Inputs->empty())
+    return false;
   for (auto &Path : *Inputs)
     if (!IsFile(Path))
       return false;
@@ -357,7 +363,7 @@ int CleanseCrashInput(const std::vector<std::string> &Args,
                       const FuzzingOptions &Options) {
   if (Inputs->size() != 1 || !Flags.exact_artifact_path) {
     Printf("ERROR: -cleanse_crash should be given one input file and"
-          " -exact_artifact_path\n");
+           " -exact_artifact_path\n");
     exit(1);
   }
   std::string InputFilePath = Inputs->at(0);
@@ -403,7 +409,8 @@ int CleanseCrashInput(const std::vector<std::string> &Args,
         }
       }
     }
-    if (!Changed) break;
+    if (!Changed)
+      break;
   }
   return 0;
 }
@@ -592,7 +599,7 @@ int AnalyzeDictionary(Fuzzer *F, const std::vector<Unit> &Dict,
   for (size_t i = 0; i < Dict.size(); ++i) {
     // Dictionary units with positive score are treated as useful ones.
     if (Scores[i] > 0)
-       continue;
+      continue;
 
     Printf("\"");
     PrintASCII(Dict[i].data(), Dict[i].size(), "\"");
@@ -605,7 +612,8 @@ int AnalyzeDictionary(Fuzzer *F, const std::vector<Unit> &Dict,
 std::vector<std::string> ParseSeedInuts(const char *seed_inputs) {
   // Parse -seed_inputs=file1,file2,... or -seed_inputs=@seed_inputs_file
   std::vector<std::string> Files;
-  if (!seed_inputs) return Files;
+  if (!seed_inputs)
+    return Files;
   std::string SeedInputs;
   if (Flags.seed_inputs[0] == '@')
     SeedInputs = FileToString(Flags.seed_inputs + 1); // File contains list.
@@ -627,7 +635,8 @@ std::vector<std::string> ParseSeedInuts(const char *seed_inputs) {
 
 std::vector<std::string> ParseFuzzers(const char *fuzzers) {
   std::vector<std::string> FuzzerList;
-  if (!fuzzers) return FuzzerList;
+  if (!fuzzers)
+    return FuzzerList;
   std::string Fuzzers;
   if (Flags.fuzzers[0] == '@')
     Fuzzers = FileToString(Flags.fuzzers + 1); // File contains list.
@@ -826,10 +835,10 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
       !(Flags.merge || Flags.set_cover_merge)) {
     if (RunIndividualFiles)
       return CollectDataFlow(Flags.collect_data_flow, Flags.data_flow_trace,
-                        ReadCorpora({}, *Inputs));
+                             ReadCorpora({}, *Inputs));
     else
       return CollectDataFlow(Flags.collect_data_flow, Flags.data_flow_trace,
-                        ReadCorpora(*Inputs, {}));
+                             ReadCorpora(*Inputs, {}));
   }
 
   Random Rand(Seed);
@@ -837,12 +846,12 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
   auto *Corpus = new InputCorpus(Options.OutputCorpus, Entropic);
   auto *F = new Fuzzer(Callback, *Corpus, *MD, Options);
 
-  for (auto &U: Dictionary)
+  for (auto &U : Dictionary)
     if (U.size() <= Word::GetMaxSize())
       MD->AddWordToManualDictionary(Word(U.data(), U.size()));
 
-      // Threads are only supported by Chrome. Don't use them with emscripten
-      // for now.
+  // Threads are only supported by Chrome. Don't use them with emscripten
+  // for now.
 #if !LIBFUZZER_EMSCRIPTEN
   StartRssThread(F, Flags.rss_limit_mb);
 #endif // LIBFUZZER_EMSCRIPTEN
@@ -897,7 +906,7 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
 
   Options.ForkCorpusGroups = Flags.fork_corpus_groups;
   std::vector<std::string> Fuzzers = ParseFuzzers(Flags.fuzzers);
-  //Printf("Fuzzers: 111\n");
+  // Printf("Fuzzers: 111\n");
   if (Flags.fork)
     FuzzWithFork(F->GetMD().GetRand(), Options, Args, *Inputs, Flags.fork, Callback, Fuzzers);
 
@@ -915,7 +924,7 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
   }
 
   if (Flags.analyze_dict) {
-    size_t MaxLen = INT_MAX;  // Large max length.
+    size_t MaxLen = INT_MAX; // Large max length.
     UnitVector InitialCorpus;
     for (auto &Inp : *Inputs) {
       Printf("Loading corpus dir: %s\n", Inp.c_str());
@@ -943,7 +952,7 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
            F->secondsSinceProcessStartUp());
   F->PrintFinalStats();
 
-  exit(0);  // Don't let F destroy itself.
+  exit(0); // Don't let F destroy itself.
 }
 
 extern "C" ATTRIBUTE_INTERFACE int
@@ -955,4 +964,4 @@ LLVMFuzzerRunDriver(int *argc, char ***argv,
 // Storage for global ExternalFunctions object.
 ExternalFunctions *EF = nullptr;
 
-}  // namespace fuzzer
+} // namespace fuzzer

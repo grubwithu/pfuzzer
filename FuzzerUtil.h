@@ -48,7 +48,7 @@ void PrintMemoryProfile();
 unsigned NumberOfCpuCores();
 
 // Platform specific functions.
-void SetSignalHandler(const FuzzingOptions& Options);
+void SetSignalHandler(const FuzzingOptions &Options);
 
 void SleepSeconds(int Seconds);
 
@@ -112,11 +112,13 @@ inline uint8_t *RoundDownByPage(uint8_t *P) {
 }
 
 #if __BYTE_ORDER == __LITTLE_ENDIAN
-template <typename T> T HostToLE(T X) { return X; }
+template <typename T>
+T HostToLE(T X) { return X; }
 #else
-template <typename T> T HostToLE(T X) { return Bswap(X); }
+template <typename T>
+T HostToLE(T X) { return Bswap(X); }
 #endif
 
-}  // namespace fuzzer
+} // namespace fuzzer
 
-#endif  // LLVM_FUZZER_UTIL_H
+#endif // LLVM_FUZZER_UTIL_H
