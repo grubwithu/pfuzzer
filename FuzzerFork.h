@@ -34,13 +34,6 @@
 
 namespace fuzzer {
 
-struct ConstraintGroup {
-  std::string GroupId;
-  std::string Function;
-  double Importance;
-  std::vector<std::vector<std::string>> Paths;
-};
-
 void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
                   const std::vector<std::string> &Args,
                   const std::vector<std::string> &CorpusDirs,
@@ -395,7 +388,7 @@ public:
   // 计算种子权重
   void CalculateSeedWeight(std::vector<TracePC::FuncInfo> &ValueFuncsList,
                            std::vector<TracePC::CoverageInfo> &CoverageInfos, std::string FuzzerName) {
-    std::cout << "\tCalculating: Seed Weight for Fuzzer: " << FuzzerName << std::endl;
+    std::cerr << "\tCalculating: Seed Weight for Fuzzer: " << FuzzerName << std::endl;
     double SeedWeight = 0;
     auto It = TracePC::CoverageInfo::FindByName(CoverageInfos, FuzzerName);
     if (It == CoverageInfos.end()) {
@@ -452,11 +445,18 @@ public:
     }
   }
   std::vector<SeedInfo *> GetJobSeeds(size_t SeedsNum, const std::string &FuzzerName, Random &Rand,
-                                      std::vector<TracePC::CoverageInfo> &CoverageInfos, double Explore) {
+                                      std::vector<TracePC::CoverageInfo> &CoverageInfos, double Explore,
+                                      std::vector<ConstraintGroup> &ConstraintGroups) {
     // std::cout << "Getting Job Seeds for Fuzzer: " << FuzzerName << " with Seed Number: " << SeedsNum << std::endl;
     std::vector<SeedInfo *> SortedSeeds;
     std::vector<SeedInfo *> JobSeeds;
-    std::vector<TracePC::FuncInfo> ValueFuncsList = TPC.GetValueFuncsList(CoverageInfos, FuzzerName);
+
+    std::vector<TracePC::FuncInfo> ValueFuncsList;
+    if (ConstraintGroups.size() < 1) {
+      ValueFuncsList = TPC.GetValueFuncsList(CoverageInfos, FuzzerName);
+    } else {
+      ValueFuncsList = TPC.GetValueFuncsList(CoverageInfos, FuzzerName, ConstraintGroups[0]);
+    }
     // std::cout << "Value Functions List Size: " << ValueFuncsList.size() << std::endl;
     CalculateSeedWeight(ValueFuncsList, CoverageInfos, FuzzerName);
     CalculateSeedScore(Explore);
@@ -485,7 +485,7 @@ public:
       // std::cout << "Selected Seed: " << SortedSeeds[Index]->File << " with UCB1 Score: " << SortedSeeds[Index]->UCB1Score << std::endl;
     }
     if (JobSeeds.size() <= 1) {
-      std::cout << "No enough seeds selected, using random live seeds." << std::endl;
+      std::cerr << "No enough seeds selected, using random live seeds." << std::endl;
       for (size_t i = 0; i < SeedsNum; i++) {
         size_t Index = Rand.SkewTowardsLast(SortedSeeds.size());
         SortedSeeds[Index]->Selections++;

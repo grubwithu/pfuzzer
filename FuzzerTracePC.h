@@ -22,6 +22,13 @@
 
 namespace fuzzer {
 
+struct ConstraintGroup {
+  std::string GroupId;
+  std::string Function;
+  double Importance;
+  std::vector<std::vector<std::string>> Paths;
+}; // From HFC
+
 // TableOfRecentCompares (TORC) remembers the most recently performed
 // comparisons of type T.
 // We record the arguments of CMP instructions in this table unconditionally
@@ -83,7 +90,7 @@ public:
     size_t UncoverSize = 0;
     size_t CoveredSize = 0;
     // size_t NoNewCount = 2;
-    // double Weight;
+    double Weight;
     FuncInfo(uintptr_t id, size_t hits, size_t uncoverSize, size_t coveredSize /*, size_t noNewCount*/)
         : Id(id), Hits(hits), UncoverSize(uncoverSize), CoveredSize(coveredSize) /*, NoNewCount(noNewCount)*/ {}
 
@@ -128,7 +135,7 @@ public:
   };
 
   size_t CalculateFuncsAverageHits(std::vector<CoverageInfo> &CoverageInfos, std::string FuzzerName) {
-    std::cout << "\tCalculating: Functions Average Hits for Fuzzer: " << FuzzerName << std::endl;
+    std::cerr << "\tCalculating: Functions Average Hits for Fuzzer: " << FuzzerName << std::endl;
     auto It = CoverageInfo::FindByName(CoverageInfos, FuzzerName);
     // 如果这里没找到对应FuzzerName的CoverageInfo，则返回第一个CoverageInfo的FuncsInfo的平均值，即global average hits
     if (It == CoverageInfos.end()) {
@@ -147,11 +154,41 @@ public:
         FuncCount++;
       }
     }
-    std::cout << "\tCalculating:Total Hits: " << TotalHits << " Function Count: " << FuncCount << std::endl;
+    std::cerr << "\tCalculating:Total Hits: " << TotalHits << " Function Count: " << FuncCount << std::endl;
     return FuncCount > 0 ? TotalHits / FuncCount : 0;
   }
 
-  // TODO: Create a copy of GetValueFuncsList and make compatible with hfc.
+  // TODO: Create a copy of GetValueFuncsList and make compatible with hfc.  
+  std::vector<FuncInfo> GetValueFuncsList(std::vector<CoverageInfo> &CoverageInfos, std::string FuzzerName,
+                                          ConstraintGroup &ConstraintGroup) {
+    std::vector<FuncInfo> ValueFuncsList;
+
+    for (const auto &Func : CoverageInfos[0].FuncsInfo) {
+      auto FuncName = DescribePC("%F", Func.Id);
+      if (FuncName.find_first_of("in") == 0) {
+        FuncName = FuncName.substr(3);
+      } else {
+        continue;
+      }
+      if (FuncName == ConstraintGroup.Function) {
+        auto NewFunc = Func;
+        NewFunc.Weight = 1000;
+        ValueFuncsList.push_back(NewFunc);
+        continue;
+      }
+
+      for (const auto &Path : ConstraintGroup.Paths) {
+        if (std::find(Path.begin(), Path.end(), FuncName) != Path.end()) {
+          auto NewFunc = Func;
+          NewFunc.Weight = 50;
+          ValueFuncsList.push_back(NewFunc);
+          break;
+        }
+      }
+    }
+    std::cerr << "Total Value Functions: " << ValueFuncsList.size() << std::endl;
+    return ValueFuncsList;
+  }
   // 低频函数识别
   std::vector<FuncInfo> GetValueFuncsList(std::vector<CoverageInfo> &CoverageInfos, std::string FuzzerName) {
     // std::cout << "Getting Value Functions List for Fuzzer: " << FuzzerName << std::endl;

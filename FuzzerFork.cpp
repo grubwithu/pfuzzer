@@ -102,13 +102,24 @@ struct GlobalEnv {
         std::cerr << "Recommend function failed: " << Res->body << std::endl;
       }
       auto JsonRes = json::parse(Res->body);
-      if (JsonRes.contains("constraint_groups")) {
-        for (auto &Group : JsonRes["constraint_groups"]) {
+      if (!JsonRes.contains("data") || !JsonRes["data"].contains("constraint_groups")) {
+        std::cerr << "peekResult reponse body is not valid, please check hfc is running correctly." << std::endl;
+      }
+      if (JsonRes["data"]["constraint_groups"].is_array()) {
+        for (auto &Group : JsonRes["data"]["constraint_groups"]) {
           ConstraintGroup CGroup;
           CGroup.GroupId = Group["group_id"];
           CGroup.Function = Group["function"];
           CGroup.Importance = Group["importance"];
           CGroup.Paths = Group["paths"];
+          // Print CGroup.Paths
+          std::cerr << "GroupId: " << CGroup.GroupId << " Function: " << CGroup.Function << " Importance: " << CGroup.Importance << std::endl;
+          for (auto &Path : CGroup.Paths) {
+            for (auto &P : Path) {
+              std::cerr << P << " ";
+            }
+            std::cerr << std::endl;
+          }
           ConstraintGroups.push_back(CGroup);
         }
       }
@@ -130,7 +141,7 @@ struct GlobalEnv {
     std::vector<SeedInfo *> JobSeeds;
     {
       std::lock_guard<std::mutex> Lock(Mtx);
-      JobSeeds = GlobalCorpus->GetJobSeeds(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0);
+      JobSeeds = GlobalCorpus->GetJobSeeds(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0, ConstraintGroups);
     }
     Job->JobSeeds = JobSeeds;
     Job->LogPath = DirPlusFile(TempDir, std::to_string(JobId) + ".log");
@@ -173,7 +184,6 @@ struct GlobalEnv {
       NumRuns += Stats.number_of_executed_units;
     }
     std::string LocalCorpusDir = GetLocalCorpusDir(Job->CorpusDir, Job->FuzzerName);
-    
 
     auto& Client = *GetHTTPClient();
     json Body = {
@@ -188,7 +198,6 @@ struct GlobalEnv {
       }
     }
   
-
     std::vector<SizedFile> LocalCorpusSeeds;
     GetSizedFilesFromDir(LocalCorpusDir, &LocalCorpusSeeds);
     //std::sort(LocalCorpusSeeds.begin(), LocalCorpusSeeds.end());
