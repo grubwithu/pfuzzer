@@ -8,8 +8,8 @@
 // Spawn and orchestrate separate fuzzing processes.
 //===----------------------------------------------------------------------===//
 
-#include "FuzzerCommand.h"
 #include "FuzzerFork.h"
+#include "FuzzerCommand.h"
 #include "FuzzerIO.h"
 #include "FuzzerInternal.h"
 #include "FuzzerMerge.h"
@@ -31,31 +31,30 @@
 namespace fuzzer {
 
 using json = nlohmann::json;
-static httplib::Client *GetHTTPClient() {
+httplib::Client *GetHTTPClient() {
   static httplib::Client *Client = nullptr;
   if (!Client) {
     auto HfcUrl = getenv("HFC_URL");
     if (HfcUrl) {
       Client = new httplib::Client(HfcUrl);
     } else {
-      std::cerr << "HFC_URL is not set" << std::endl;
-      exit(1);
+      std::cerr << "HFC_URL is not set, using localhost:8080" << std::endl;
+      Client = new httplib::Client("localhost", 8080);
     }
   }
   return Client;
 }
-
 
 struct GlobalEnv {
   std::vector<std::string> Args;
   std::vector<std::string> CorpusDirs;
   std::string MainCorpusDir;
   std::string TempDir;
-  //std::string DFTDir;
-  //std::string DataFlowBinary;
+  // std::string DFTDir;
+  // std::string DataFlowBinary;
   std::set<uint32_t> Features, Cov;
   std::set<uintptr_t> Funcs;
-  //std::set<std::string> FilesWithDFT;
+  // std::set<std::string> FilesWithDFT;
   std::vector<std::string> Files;
   std::vector<std::size_t> FilesSizes;
   Random *Rand;
@@ -69,12 +68,12 @@ struct GlobalEnv {
   size_t NumCrashes = 0;
 
   size_t NumRuns = 0;
-  
+
   UserCallback Callback;
   std::mutex Mtx;
   std::vector<std::string> Fuzzers;
   std::vector<FuzzerInfo> FuzzerStatuses;
-  //输出一些信息到本地文本文件中
+  // 输出一些信息到本地文本文件中
   std::string LogPath;
 
   std::string StopFile() { return DirPlusFile(TempDir, "STOP"); }
@@ -85,18 +84,135 @@ struct GlobalEnv {
         .count();
   }
 
+  std::string SelectFuzzer(
+      std::vector<ConstraintGroup> ConstraintGroups,
+      std::unordered_map</*Fuzzer*/ std::string, std::unordered_map</*Constraint*/ std::string, double>> FuzzerScores) {
+
+    std::string FuzzerName = "";
+
+    // 基于ConstraintGroups和FuzzerScores选择Fuzzer
+    if (!ConstraintGroups.empty() && !FuzzerScores.empty()) {
+      // 第一步：选择constraint_group，importance高的有更高概率，但低的也有机会
+      std::vector<double> groupProbabilities;
+      double totalImportance = 0.0;
+
+      // 计算总importance并添加基础概率确保低importance的group也有机会
+      for (const auto &group : ConstraintGroups) {
+        totalImportance += group.Importance;
+      }
+
+      // 为每个group计算选择概率，使用softmax函数确保概率分布
+      double temperature = 0.5; // 温度参数，控制随机性，值越大随机性越高
+      double sumExp = 0.0;
+      std::vector<double> expValues;
+
+      for (const auto &group : ConstraintGroups) {
+        double expValue = exp(group.Importance / temperature);
+        expValues.push_back(expValue);
+        sumExp += expValue;
+      }
+
+      for (const auto &expValue : expValues) {
+        groupProbabilities.push_back(expValue / sumExp);
+      }
+
+      // 根据概率随机选择一个group
+      double randomValue = Rand->Rand<int>() % 1000 / 1000.0;
+      double cumulativeProbability = 0.0;
+      ConstraintGroup selectedGroup;
+
+      for (size_t i = 0; i < ConstraintGroups.size(); i++) {
+        cumulativeProbability += groupProbabilities[i];
+        if (randomValue <= cumulativeProbability) {
+          selectedGroup = ConstraintGroups[i];
+          break;
+        }
+        // 如果没有选中，默认选择最后一个
+        if (i == ConstraintGroups.size() - 1) {
+          selectedGroup = ConstraintGroups[i];
+        }
+      }
+
+      // 第二步：基于选中的group选择最适合的fuzzer
+      // 计算每个fuzzer与该group的匹配度（点乘）
+      std::vector<std::pair<std::string, double>> fuzzerScores;
+
+      for (const auto &fuzzerEntry : FuzzerScores) {
+        const std::string &fuzzerName = fuzzerEntry.first;
+        const auto &fuzzerConstraints = fuzzerEntry.second;
+
+        // 计算点乘：group.constraint_score与fuzzer的约束分数
+        double dotProduct = 0.0;
+        for (const auto &constraint : fuzzerConstraints) {
+          for (const auto &constraint : selectedGroup.ConstraintScores) {
+            if (constraint.first == constraint.first) {
+              dotProduct += constraint.second * fuzzerConstraints.at(constraint.first);
+            }
+          }
+        }
+
+        fuzzerScores.push_back({fuzzerName, dotProduct});
+      }
+
+      // 按分数排序
+      std::sort(fuzzerScores.begin(), fuzzerScores.end(),
+                [](const auto &a, const auto &b) { return a.second > b.second; });
+
+      // 第三步：使用加权随机选择fuzzer，分数高的有更高概率，但低的也有机会
+      if (!fuzzerScores.empty()) {
+        // 使用softmax函数计算选择概率
+        temperature = 0.3; // 较低的温度，更倾向于选择高分fuzzer
+        sumExp = 0.0;
+        std::vector<double> fuzzerExpValues;
+
+        for (const auto &fuzzer : fuzzerScores) {
+          double expValue = exp(fuzzer.second / temperature);
+          fuzzerExpValues.push_back(expValue);
+          sumExp += expValue;
+        }
+
+        std::vector<double> fuzzerProbabilities;
+        for (const auto &expValue : fuzzerExpValues) {
+          fuzzerProbabilities.push_back(expValue / sumExp);
+        }
+
+        // 根据概率随机选择一个fuzzer
+        randomValue = Rand->Rand<int>() % 1000 / 1000.0;
+        cumulativeProbability = 0.0;
+
+        for (size_t i = 0; i < fuzzerScores.size(); i++) {
+          cumulativeProbability += fuzzerProbabilities[i];
+          if (randomValue <= cumulativeProbability) {
+            FuzzerName = fuzzerScores[i].first;
+            break;
+          }
+          // 如果没有选中，默认选择第一个（分数最高的）
+          if (i == fuzzerScores.size() - 1) {
+            FuzzerName = fuzzerScores[0].first;
+          }
+        }
+
+        Printf("\tSelected Fuzzer: %s for Constraint Group: %s (Importance: %f)\n",
+               FuzzerName.c_str(), selectedGroup.GroupId.c_str(), selectedGroup.Importance);
+      }
+    }
+
+    return FuzzerName;
+  }
+
   FuzzJob *CreateNewJob(size_t JobId, GlobalCorpusInfo *GlobalCorpus, std::vector<TracePC::CoverageInfo> *CoverageInfos, ArgsInfo *AllArgsInfo) {
-    //COV or Crash
-    //Select a fuzzer
-    //Select seeds
-    //GetJobType
+    // COV or Crash
+    // Select a fuzzer
+    // Select seeds
+    // GetJobType
     auto Job = new FuzzJob;
     Job->JobId = JobId;
 
     // Get recommended function name from hfc.
-    auto& Client = *GetHTTPClient();
+    auto &Client = *GetHTTPClient();
     auto Res = Client.Get("/peekResult");
     std::vector<ConstraintGroup> ConstraintGroups;
+    std::unordered_map</*Fuzzer*/ std::string, std::unordered_map</*Constraint*/ std::string, double>> FuzzerScores;
     if (Res) {
       if (Res->status != 200) {
         std::cerr << "Recommend function failed: " << Res->body << std::endl;
@@ -123,21 +239,29 @@ struct GlobalEnv {
           ConstraintGroups.push_back(CGroup);
         }
       }
+
+      if (JsonRes["data"]["fuzzer_scores"].is_object()) {
+        FuzzerScores = JsonRes["data"]["fuzzer_scores"];
+      }
     }
 
-    //加锁
-    std::string FuzzerName;
+    // 加锁
+    std::string FuzzerName = SelectFuzzer(ConstraintGroups, FuzzerScores);
+    if (FuzzerName == "")
+      FuzzerName = GetFuzzerName(FuzzerStatuses, JobId, LogPath);
+      
     {
       std::lock_guard<std::mutex> Lock(Mtx);
-      FuzzerName = GetFuzzerName(FuzzerStatuses, JobId, LogPath);
       Job->FuzzerName = FuzzerName;
       auto it = FuzzerInfo::FindByName(FuzzerStatuses, FuzzerName);
-      if (it != FuzzerStatuses.end()) it->Selections++;
+      if (it != FuzzerStatuses.end())
+        it->Selections++;
     }
-    std::string JobBudget = std::to_string(std::min((size_t)3600, JobId * 20));//TODO GetJobBudget FUNC()
+
+    std::string JobBudget = std::to_string(std::min((size_t)3600, JobId * 20)); // TODO GetJobBudget FUNC()
     Job->JobBudget = JobBudget;
-    size_t SeedsNum = std::min(GlobalCorpus->GetLiveInputsSize(), 10 * (size_t)sqrt(GlobalCorpus->GetLiveInputsSize() + 2));// TODO GetSeedsNum FUNC()
-    //智能锁
+    size_t SeedsNum = std::min(GlobalCorpus->GetLiveInputsSize(), 10 * (size_t)sqrt(GlobalCorpus->GetLiveInputsSize() + 2)); // TODO GetSeedsNum FUNC()
+    // 智能锁
     std::vector<SeedInfo *> JobSeeds;
     {
       std::lock_guard<std::mutex> Lock(Mtx);
@@ -156,10 +280,10 @@ struct GlobalEnv {
     }
     CopyMultipleFiles(JobSeeds, Job->InputDir);
     AllArgsInfo->GetFuzzerCmd(FuzzerName, *Job, Args, CorpusDirs, TempDir);
-    //Print Job INFO :JobId Job->FuzzerName Jobseeds num , jobbudget JobInput JobcORPUS
+    // Print Job INFO :JobId Job->FuzzerName Jobseeds num , jobbudget JobInput JobcORPUS
     Printf("\tCreateNewJob Done: JobId: %zd, FuzzerName: %s, JobSeedsNum: %zd, JobBudget: %s, JobInput: %s, JobCorpus: %s\n",
            JobId, Job->FuzzerName.c_str(), JobSeeds.size(), Job->JobBudget.c_str(), Job->InputDir.c_str(), Job->CorpusDir.c_str());
-    //将CreateNewJob信息写入LogPath
+    // 将CreateNewJob信息写入LogPath
     std::ofstream LogFile(LogPath, std::ios::app);
     LogFile << "\tCreateNewJob Done: JobId: " << JobId << ", FuzzerName: " << Job->FuzzerName << ", JobSeedsNum: " << JobSeeds.size() << ", JobBudget: " << Job->JobBudget << ", JobInput: " << Job->InputDir << ", JobCorpus: " << Job->CorpusDir << std::endl;
     LogFile.close();
@@ -171,13 +295,13 @@ struct GlobalEnv {
   }
 
   void RunOneMergeJob(FuzzJob *Job, std::vector<TracePC::CoverageInfo> *CoverageInfos, GlobalCorpusInfo *GlobalCorpus) {
-    //TODO
-    //1.Collect loacl corpus seeds
-    //2.Run these seeds and collect coverage info
-    //3.calculate the feedback of job and fuzzer
-    //4.Merge coverage info
-    //5.Update global corpus
-    //加锁
+    // TODO
+    // 1.Collect loacl corpus seeds
+    // 2.Run these seeds and collect coverage info
+    // 3.calculate the feedback of job and fuzzer
+    // 4.Merge coverage info
+    // 5.Update global corpus
+    // 加锁
     {
       std::lock_guard<std::mutex> Lock(Mtx);
       auto Stats = ParseFinalStatsFromLog(Job->LogPath);
@@ -185,11 +309,11 @@ struct GlobalEnv {
     }
     std::string LocalCorpusDir = GetLocalCorpusDir(Job->CorpusDir, Job->FuzzerName);
 
-    auto& Client = *GetHTTPClient();
+    auto &Client = *GetHTTPClient();
     json Body = {
-      {"fuzzer", Job->FuzzerName},
-      {"identity", Job->FuzzerName},
-      {"corpus", {LocalCorpusDir}},
+        {"fuzzer", Job->FuzzerName},
+        {"identity", Job->FuzzerName},
+        {"corpus", {LocalCorpusDir}},
     };
     auto Res = Client.Post("/reportCorpus", Body.dump(), "application/json");
     if (Res) {
@@ -197,19 +321,19 @@ struct GlobalEnv {
         std::cerr << "Report corpus failed: " << Res->body << std::endl;
       }
     }
-  
+
     std::vector<SizedFile> LocalCorpusSeeds;
     GetSizedFilesFromDir(LocalCorpusDir, &LocalCorpusSeeds);
-    //std::sort(LocalCorpusSeeds.begin(), LocalCorpusSeeds.end());
+    // std::sort(LocalCorpusSeeds.begin(), LocalCorpusSeeds.end());
     std::vector<MergeSeedInfo> MergeSeedCandidates;
-    //找到std::vector<TracePC::CoverageInfo> *CoverageInfos中FuzzerName对应的CoverageInfo
-    auto FuzzerIt = std::find_if(CoverageInfos->begin(), CoverageInfos->end(), [&](const TracePC::CoverageInfo &Info){ return Info.FuzzerName == Job->FuzzerName; });
+    // 找到std::vector<TracePC::CoverageInfo> *CoverageInfos中FuzzerName对应的CoverageInfo
+    auto FuzzerIt = std::find_if(CoverageInfos->begin(), CoverageInfos->end(), [&](const TracePC::CoverageInfo &Info) { return Info.FuzzerName == Job->FuzzerName; });
     if (FuzzerIt == CoverageInfos->end()) {
-      //std::cout << "No coverage info for this fuzzer found." << std::endl;
+      // std::cout << "No coverage info for this fuzzer found." << std::endl;
       FuzzerIt = CoverageInfos->begin();
     }
     auto GlobalIt = CoverageInfos->begin();
-    //加锁
+    // 加锁
     {
       std::lock_guard<std::mutex> Lock(Mtx);
       for (auto &F : LocalCorpusSeeds) {
@@ -224,18 +348,22 @@ struct GlobalEnv {
         auto UnitEndTime = std::chrono::system_clock::now();
         assert(CBRes == 0 || CBRes == -1);
         std::chrono::microseconds TimeOfUnit = std::chrono::duration_cast<std::chrono::microseconds>(UnitEndTime - UnitStartTime);
-        TPC.CollectFeatures([&](uint32_t Feature){ NewFeatures.push_back(Feature); });
+        TPC.CollectFeatures([&](uint32_t Feature) { NewFeatures.push_back(Feature); });
         TPC.UpdateObservedPCs(*FuzzerIt);
         TPC.UpdateObservedPCs(*GlobalIt);
         TPC.GetSeedTrace();
-        TPC.ForEachCurrentObservedPC([&](const TracePC::PCTableEntry *TE){
+        TPC.ForEachCurrentObservedPC([&](const TracePC::PCTableEntry *TE) {
           SeedPCs.push_back(TE);
           if (TPC.PcIsFuncEntry(TE)) {
             auto Func = TPC.GetNextInstructionPc(TE->PC);
             SeedFuncs.push_back(Func);
-            if (Funcs.insert(Func).second) {Job->NewFuncs.push_back(Func);}
+            if (Funcs.insert(Func).second) {
+              Job->NewFuncs.push_back(Func);
+            }
           }
-          if (Cov.insert(TPC.PCTableEntryIdx(TE)).second) {Job->NewCov.push_back(TPC.PCTableEntryIdx(TE));}
+          if (Cov.insert(TPC.PCTableEntryIdx(TE)).second) {
+            Job->NewCov.push_back(TPC.PCTableEntryIdx(TE));
+          }
         });
         MergeSeedInfo MergeSeedCandidate;
         MergeSeedCandidate.FilePath = F.File;
@@ -249,35 +377,35 @@ struct GlobalEnv {
       TPC.GetFuncFreqsUncoveredInfo(*GlobalIt);
       TPC.GetFuncFreqsUncoveredInfo(*FuzzerIt);
     }
-    //TODO
-    //1.calculate the feedback of job and fuzzer
-    //2.Merge coverage info
-    //3.Update global corpus
-    //加锁
+    // TODO
+    // 1.calculate the feedback of job and fuzzer
+    // 2.Merge coverage info
+    // 3.Update global corpus
+    // 加锁
     double JobFeedback = CalculateJobFeedback(Job, MergeSeedCandidates, *GlobalIt);
-    //TODO
-    //Sort MergeSeedCandidates by SortedWeight
-    //1.Merge coverage info
-    //2.Update global corpus
+    // TODO
+    // Sort MergeSeedCandidates by SortedWeight
+    // 1.Merge coverage info
+    // 2.Update global corpus
     SortMergeSeedCandidates(MergeSeedCandidates);
-        //加锁
+    // 加锁
     {
       std::lock_guard<std::mutex> Lock(Mtx);
-      for (size_t i = 0; i < MergeSeedCandidates.size(); i++){
+      for (size_t i = 0; i < MergeSeedCandidates.size(); i++) {
         auto U = FileToVector(MergeSeedCandidates[i].FilePath);
         auto FileName = Hash(U);
         auto NewFilePath = DirPlusFile(MainCorpusDir, FileName);
         std::vector<uint32_t> TmpFeatureSet;
         size_t NumUpdatesBefore = GlobalCorpus->NumFeatureUpdates();
-        //size_t NumFeaturesBefore = GlobalCorpus->NumFeatures();
-        for (auto Feature : MergeSeedCandidates[i].Features){
+        // size_t NumFeaturesBefore = GlobalCorpus->NumFeatures();
+        for (auto Feature : MergeSeedCandidates[i].Features) {
           if (GlobalCorpus->AddFeature(Feature, MergeSeedCandidates[i].Size, &Features))
             TmpFeatureSet.push_back(Feature);
           GlobalCorpus->UpdateFeatureFrequency(nullptr, Feature);
         }
         size_t NumNewFeatures = GlobalCorpus->NumFeatureUpdates() - NumUpdatesBefore;
-        //size_t NumNewAddedFeatures = GlobalCorpus->NumFeatures() - NumFeaturesBefore;
-        if (NumNewFeatures > 0){
+        // size_t NumNewAddedFeatures = GlobalCorpus->NumFeatures() - NumFeaturesBefore;
+        if (NumNewFeatures > 0) {
           WriteToFile(U, NewFilePath);
           SeedInfo *NewSI = GlobalCorpus->AddToCorpus(FileName, NewFilePath, NumNewFeatures,
                                                       std::chrono::microseconds(MergeSeedCandidates[i].TimeOfUnit), TmpFeatureSet,
@@ -285,36 +413,35 @@ struct GlobalEnv {
         }
       }
     }
-    //更新FuzzerStatuses
+    // 更新FuzzerStatuses
     {
       std::lock_guard<std::mutex> Lock(Mtx);
       auto FuzzerIt = FuzzerInfo::FindByName(FuzzerStatuses, Job->FuzzerName);
       if (FuzzerIt != FuzzerStatuses.end()) {
-        if(Job->JobId < 8){
+        if (Job->JobId < 8) {
           FuzzerIt->Score += 10;
-        }
-        else{
+        } else {
           FuzzerIt->Score += JobFeedback;
         }
         FuzzerIt->CoveredBranches += Job->NewCov.size();
         FuzzerIt->UsedBudget += std::stod(Job->JobBudget);
       }
     }
-    //打印输出：NumRuns Cov.size() Features.size() Job->JobId Seeds live
-    //打印信息补充FuzzerName：JobFeedback：
+    // 打印输出：NumRuns Cov.size() Features.size() Job->JobId Seeds live
+    // 打印信息补充FuzzerName：JobFeedback：
     Printf("\tMergeJob Done: JobId: %zd, FuzzerName: %s, JobFeedback: %f, NumRuns: %zd, Cov: %zd, Features: %zd, Seeds: %zd\n", Job->JobId, Job->FuzzerName.c_str(), JobFeedback, NumRuns, Cov.size(), Features.size(), GlobalCorpus->GetLiveInputsSize());
-    //将MergeJob信息写入LogPath
+    // 将MergeJob信息写入LogPath
     std::ofstream LogFile(LogPath, std::ios::app);
     LogFile << "\tMergeJob Done: JobId: " << Job->JobId << ", FuzzerName: " << Job->FuzzerName << ", JobFeedback: " << JobFeedback << ", NumRuns: " << NumRuns << ", Cov: " << Cov.size() << ", Features: " << Features.size() << ", Seeds: " << GlobalCorpus->GetLiveInputsSize() << std::endl;
     LogFile.close();
-    
-    for (auto IDX : Job->NewCov){
-      if (auto *TE = TPC.PCTableEntryByIdx(IDX)){
-        if (TPC.PcIsFuncEntry(TE)){
-        PrintPC("  NEW_FUNC: %p %F %L\n", "", TPC.GetNextInstructionPc(TE->PC));
+
+    for (auto IDX : Job->NewCov) {
+      if (auto *TE = TPC.PCTableEntryByIdx(IDX)) {
+        if (TPC.PcIsFuncEntry(TE)) {
+          PrintPC("  NEW_FUNC: %p %F %L\n", "", TPC.GetNextInstructionPc(TE->PC));
         }
       }
-    }   
+    }
   }
 
   void RunOneMergeJob(FuzzJob *Job) {
@@ -347,7 +474,8 @@ struct GlobalEnv {
            Stats.average_exec_per_sec, NumOOMs, NumTimeouts, NumCrashes,
            secondsSinceProcessStartUp(), Job->JobId);
 
-    if (MergeCandidates.empty()) return;
+    if (MergeCandidates.empty())
+      return;
 
     std::vector<std::string> FilesToAdd;
     std::set<uint32_t> NewFeatures, NewCov;
@@ -379,8 +507,6 @@ struct GlobalEnv {
           PrintPC("  NEW_FUNC: %p %F %L\n", "",
                   TPC.GetNextInstructionPc(TE->PC));
   }
-
-
 };
 
 struct JobQueue {
@@ -398,7 +524,7 @@ struct JobQueue {
   FuzzJob *Pop() {
     std::unique_lock<std::mutex> Lk(Mu);
     // std::lock_guard<std::mutex> Lock(Mu);
-    Cv.wait(Lk, [&]{return !Qu.empty();});
+    Cv.wait(Lk, [&] { return !Qu.empty(); });
     assert(!Qu.empty());
     auto Job = Qu.front();
     Qu.pop();
@@ -417,7 +543,7 @@ void WorkerThread(JobQueue *FuzzQ, JobQueue *MergeQ) {
 // This is just a skeleton of an experimental -fork=1 feature.
 void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
                   const std::vector<std::string> &Args,
-                  const std::vector<std::string> &CorpusDirs, 
+                  const std::vector<std::string> &CorpusDirs,
                   int NumJobs, UserCallback Callback,
                   std::vector<std::string> Fuzzers) {
   Printf("INFO: -fork=%d: fuzzing in separate process(s)\n", NumJobs);
@@ -429,9 +555,9 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
   Env.Callback = Callback;
   Env.Verbosity = Options.Verbosity;
   Env.ProcessStartTime = std::chrono::system_clock::now();
-  //Env.DataFlowBinary = Options.CollectDataFlow;
+  // Env.DataFlowBinary = Options.CollectDataFlow;
   Env.Group = Options.ForkCorpusGroups;
-  //Fuzzers preprocess 
+  // Fuzzers preprocess
   Env.Fuzzers = Fuzzers;
   if (Fuzzers.size() > 0) {
     Env.FuzzerStatuses.resize(Fuzzers.size());
@@ -444,7 +570,7 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
     }
     Printf("INFO: -fork=%d: fuzzing in separate process(s) with fuzzers: %s\n", NumJobs, Env.Fuzzers[0].c_str());
   }
-  //我想用一个Vector来存在全局的CoverageInfo和每个fuzzer的CoverageInfo
+  // 我想用一个Vector来存在全局的CoverageInfo和每个fuzzer的CoverageInfo
   std::vector<TracePC::CoverageInfo> CoverageInfos;
   if (Fuzzers.size() > 1) {
     CoverageInfos.resize(Fuzzers.size() + 1);
@@ -456,8 +582,7 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
       CoverageInfos[i].ObservedPCs.clear();
       CoverageInfos[i].ObservedFuncs.clear();
     }
-  }
-  else {
+  } else {
     CoverageInfos.resize(1);
     CoverageInfos[0].FuzzerName = "Global";
     CoverageInfos[0].ObservedPCs.clear();
@@ -469,7 +594,7 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
     GetSizedFilesFromDir(Dir, &SeedFiles);
   std::sort(SeedFiles.begin(), SeedFiles.end());
   Env.TempDir = TempPath("FuzzWithFork", ".dir");
-  RmDirRecursive(Env.TempDir);  // in case there is a leftover from old runs.
+  RmDirRecursive(Env.TempDir); // in case there is a leftover from old runs.
   MkDir(Env.TempDir);
   if (CorpusDirs.empty())
     MkDir(Env.MainCorpusDir = DirPlusFile(Env.TempDir, "C"));
@@ -485,18 +610,18 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
     CrashResistantMerge(Env.Args, {}, SeedFiles, &Env.Files, Env.Features,
                         &NewFeatures, Env.Cov, &NewCov, CFPath,
                         /*Verbose=*/false, /*IsSetCoverMerge=*/false);
-    //Env.Features.insert(NewFeatures.begin(), NewFeatures.end());
-    //Env.Cov.insert(NewCov.begin(), NewCov.end());
+    // Env.Features.insert(NewFeatures.begin(), NewFeatures.end());
+    // Env.Cov.insert(NewCov.begin(), NewCov.end());
     RemoveFile(CFPath);
   }
   std::vector<SizedFile> FilesWithSize;
   for (auto &File : Env.Files)
     FilesWithSize.push_back({File, FileToVector(File).size()});
-  
-  //Long Features or small size priority?
-  //获取当前ELF路径
+
+  // Long Features or small size priority?
+  // 获取当前ELF路径
   std::string CurrentPath = GetExeDirName();
-  //获取目标程序
+  // 获取目标程序
   std::string Target_Program = GetBaseName(Args[0]);
   Env.LogPath = DirPlusFile(CurrentPath, "Log.txt");
   Printf("CurrentPath: %s\n", CurrentPath.c_str());
@@ -504,7 +629,7 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
   GlobalCorpusInfo *GlobalCorpus = new GlobalCorpusInfo(Env.MainCorpusDir);
   ArgsInfo *AllArgsInfo = new ArgsInfo(CurrentPath, Target_Program);
 
-  //Corpus preprocess
+  // Corpus preprocess
   for (size_t i = 0; i < FilesWithSize.size(); i++) {
     auto U = FileToVector(FilesWithSize[i].File);
     auto FileName = Hash(U);
@@ -520,7 +645,7 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
     auto TimeOfUnit = std::chrono::duration_cast<std::chrono::microseconds>(UnitEndTime - UnitStartTime).count();
     std::vector<uint32_t> TmpFeatureSet;
     size_t NumUpdatesBefore = GlobalCorpus->NumFeatureUpdates();
-    TPC.CollectFeatures([&](uint32_t Feature){
+    TPC.CollectFeatures([&](uint32_t Feature) {
       if (GlobalCorpus->AddFeature(Feature, FilesWithSize[i].Size, &Env.Features))
         TmpFeatureSet.push_back(Feature);
       GlobalCorpus->UpdateFeatureFrequency(nullptr, Feature);
@@ -531,7 +656,7 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
     if (NumNewFeatures > 0) {
       WriteToFile(U, FilePath);
       TPC.GetSeedTrace();
-      TPC.ForEachCurrentObservedPC([&](const TracePC::PCTableEntry *TE){
+      TPC.ForEachCurrentObservedPC([&](const TracePC::PCTableEntry *TE) {
         SeedPCs.push_back(TE);
         Env.Cov.insert(TPC.PCTableEntryIdx(TE));
         if (TPC.PcIsFuncEntry(TE)) {
@@ -541,8 +666,8 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
         }
       });
       SeedInfo *NewSI = GlobalCorpus->AddToCorpus(FilesWithSize[i].File, FilePath, NumNewFeatures,
-                                                std::chrono::microseconds(TimeOfUnit), TmpFeatureSet,
-                                                SeedPCs, SeedFuncs);
+                                                  std::chrono::microseconds(TimeOfUnit), TmpFeatureSet,
+                                                  SeedPCs, SeedFuncs);
     }
   }
 
@@ -565,16 +690,15 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
     WriteToFile(Unit({1}), Env.StopFile());
   };
 
-
   size_t JobId = 1;
   std::vector<std::thread> Threads;
   for (int t = 0; t < NumJobs; t++) {
     Threads.push_back(std::thread(WorkerThread, &FuzzQ, &MergeQ));
     FuzzQ.Push(Env.CreateNewJob(JobId++, GlobalCorpus, &CoverageInfos, AllArgsInfo));
   }
-  
+
   while (true) {
-    //std::unique_ptr<FuzzJob> Job(MergeQ.Pop());
+    // std::unique_ptr<FuzzJob> Job(MergeQ.Pop());
     FuzzJob *Job = MergeQ.Pop();
     if (!Job)
       break;
@@ -588,7 +712,6 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
     // Since the number of corpus seeds will gradually increase, in order to
     // control the number in each group to be about three times the number of
     // seeds selected each time, the number of groups is dynamically adjusted.
-
 
     // Continue if our crash is one of the ignored ones.
     if (Options.IgnoreTimeouts && ExitCode == Options.TimeoutExitCode)
@@ -636,12 +759,10 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
     }
 
     std::thread([&Env, Job, &CoverageInfos, &GlobalCorpus] {
-        //Env.RunOneMergeJob(Job.get());
+      // Env.RunOneMergeJob(Job.get());
       Env.RunOneMergeJob(Job, &CoverageInfos, GlobalCorpus);
       delete Job;
     }).detach();
-
-    
 
     // Generate code: thread to create new job.
     std::thread([&FuzzQ, &Env, &JobId, &CoverageInfos, &GlobalCorpus, &AllArgsInfo] {
@@ -652,14 +773,13 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
       FuzzQ.Push(Env.CreateNewJob(JobId, GlobalCorpus, &CoverageInfos, AllArgsInfo));
     }).detach();
   }
-  for (auto &T : Threads){
-    if (T.joinable()){
+  for (auto &T : Threads) {
+    if (T.joinable()) {
       T.join();
     }
   }
   delete GlobalCorpus;
   delete AllArgsInfo;
-  
 
   // The workers have terminated. Don't try to remove the directory before they
   // terminate to avoid a race condition preventing cleanup on Windows.
@@ -672,181 +792,176 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
 }
 
 bool CopyFile(const std::string &SrcPath, const std::string &DstPath) {
-    // Check if src file exists
-    if (access(SrcPath.c_str(), F_OK) == -1) {
-        return false;
-    }
-    // Check if src file is empty
-    struct stat stat_buf;
-    if (stat(SrcPath.c_str(), &stat_buf) != 0 || stat_buf.st_size == 0) {
-        return false;
-    }
-    // Check if dst file exists
-    if (access(DstPath.c_str(), F_OK) != -1) {
-        return false;
-    }
-    // Copy file
-    std::ifstream src(SrcPath, std::ios::binary);
-    std::ofstream dst(DstPath, std::ios::binary);
-    dst << src.rdbuf();
-    return true;
+  // Check if src file exists
+  if (access(SrcPath.c_str(), F_OK) == -1) {
+    return false;
+  }
+  // Check if src file is empty
+  struct stat stat_buf;
+  if (stat(SrcPath.c_str(), &stat_buf) != 0 || stat_buf.st_size == 0) {
+    return false;
+  }
+  // Check if dst file exists
+  if (access(DstPath.c_str(), F_OK) != -1) {
+    return false;
+  }
+  // Copy file
+  std::ifstream src(SrcPath, std::ios::binary);
+  std::ofstream dst(DstPath, std::ios::binary);
+  dst << src.rdbuf();
+  return true;
 }
 
 std::string GetBaseName(const std::string &path) {
-    size_t pos = path.find_last_of("/\\");
-    if (pos != std::string::npos) {
-        return path.substr(pos + 1);
-    }
-    return path;
+  size_t pos = path.find_last_of("/\\");
+  if (pos != std::string::npos) {
+    return path.substr(pos + 1);
+  }
+  return path;
 }
 
 void CopyMultipleFiles(const std::vector<SeedInfo *> &JobSeeds, const std::string &InputDir) {
-    //Printf("CopyMultipleFiles: Starting copy process for %zu seeds\n", JobSeeds.size());
-    if (!JobSeeds.empty()) {
-        for (auto &SI : JobSeeds) {
-            if (SI->Live) {
-                std::string InputFilePath = SI->FilePath;
-                std::string InputFileName = GetBaseName(SI->File);  // 只获取文件名部分
-                std::string InputFileFullPath = DirPlusFile(InputDir, InputFileName);
-                if (!CopyFile(InputFilePath, InputFileFullPath)) {
-                    //Printf("Failed to copy file %s to %s\n", InputFilePath.c_str(), InputFileFullPath.c_str());
-                    continue;
-                }
-            }
+  // Printf("CopyMultipleFiles: Starting copy process for %zu seeds\n", JobSeeds.size());
+  if (!JobSeeds.empty()) {
+    for (auto &SI : JobSeeds) {
+      if (SI->Live) {
+        std::string InputFilePath = SI->FilePath;
+        std::string InputFileName = GetBaseName(SI->File); // 只获取文件名部分
+        std::string InputFileFullPath = DirPlusFile(InputDir, InputFileName);
+        if (!CopyFile(InputFilePath, InputFileFullPath)) {
+          // Printf("Failed to copy file %s to %s\n", InputFilePath.c_str(), InputFileFullPath.c_str());
+          continue;
         }
+      }
     }
-    else {
-        //Printf("CopyMultipleFiles: No seeds provided, creating initial seeds\n");
-        for (size_t i = 0; i < 2; i++){
-            std::string FilNname = "nullseed";
-            std::string TargetPath = InputDir + "/" + FilNname;
-            std::ofstream file(TargetPath);
-            if (file.is_open()) {
-                file << "0x" + std::to_string(rand());
-                file.close();
-                //Printf("Created initial seed: %s\n", FilNname.c_str());
-            }
-            else {
-                Printf("Failed to create initial seed: %s\n", FilNname.c_str());
-            }
-        }
+  } else {
+    // Printf("CopyMultipleFiles: No seeds provided, creating initial seeds\n");
+    for (size_t i = 0; i < 2; i++) {
+      std::string FilNname = "nullseed";
+      std::string TargetPath = InputDir + "/" + FilNname;
+      std::ofstream file(TargetPath);
+      if (file.is_open()) {
+        file << "0x" + std::to_string(rand());
+        file.close();
+        // Printf("Created initial seed: %s\n", FilNname.c_str());
+      } else {
+        Printf("Failed to create initial seed: %s\n", FilNname.c_str());
+      }
     }
-    //Printf("CopyMultipleFiles: Copy process completed\n");
+  }
+  // Printf("CopyMultipleFiles: Copy process completed\n");
 }
 
-std::string GetExeDirName(){
-    char buffer[1024];
-    ssize_t len = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
-    if (len != -1) {
-        buffer[len] = '\0';
-        // 找到最后一个'/'的位置
-        char *last_slash = strrchr(buffer, '/');
-        if (last_slash != nullptr) {
-            // 将最后一个'/'替换为'\0'，这样就只保留目录部分
-            *last_slash = '\0';
-        }
-        return std::string(buffer);
+std::string GetExeDirName() {
+  char buffer[1024];
+  ssize_t len = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+  if (len != -1) {
+    buffer[len] = '\0';
+    // 找到最后一个'/'的位置
+    char *last_slash = strrchr(buffer, '/');
+    if (last_slash != nullptr) {
+      // 将最后一个'/'替换为'\0'，这样就只保留目录部分
+      *last_slash = '\0';
     }
-    return "";
+    return std::string(buffer);
+  }
+  return "";
 }
 
+std::string GetLocalCorpusDir(const std::string &CorpusDir, const std::string &FuzzerName) {
+  // 如果FuzzerName是libfuzzer 或者 entropic 或者wingfuzz或者honggfuzz，OUTPUT_DIR是CorpusDir
+  // 如果FuzzerName是aflplusplus 或者 radamsa 或者 mopt或者是lafintel或者 redqueen，OUTPUT_DIR是CorpusDir/default/queue
+  // 如果FuzzerName是afl 或者 aflfast 或者 fairfuzz，OUTPUT_DIR是CorpusDir/queue
 
-std::string GetLocalCorpusDir(const std::string &CorpusDir, const std::string &FuzzerName){
-    //如果FuzzerName是libfuzzer 或者 entropic 或者wingfuzz或者honggfuzz，OUTPUT_DIR是CorpusDir
-    //如果FuzzerName是aflplusplus 或者 radamsa 或者 mopt或者是lafintel或者 redqueen，OUTPUT_DIR是CorpusDir/default/queue
-    //如果FuzzerName是afl 或者 aflfast 或者 fairfuzz，OUTPUT_DIR是CorpusDir/queue
-
-    std::string OutputDir;
-    if(FuzzerName == "libfuzzer" || FuzzerName == "entropic" || FuzzerName == "wingfuzz" || FuzzerName == "honggfuzz"){
-        OutputDir = CorpusDir;
-    }
-    else if(FuzzerName == "symcc" || FuzzerName == "aflplusplus" || FuzzerName == "radamsa" || FuzzerName == "mopt" || FuzzerName == "lafintel" || FuzzerName == "redqueen" || FuzzerName == "hastefuzz"){
-        OutputDir = CorpusDir + "/default/queue";
-    }//增加darwin,ecofuzz,fafuzz,learnperffuzz,neuzz
-    else if(FuzzerName == "afl" || FuzzerName == "aflfast" || FuzzerName == "aflgo" || FuzzerName == "fairfuzz" || FuzzerName == "darwin" || FuzzerName == "ecofuzz" || FuzzerName == "fafuzz"  || FuzzerName == "moptbk" || FuzzerName == "weizz"){
-        OutputDir = CorpusDir + "/queue";
-    }
-    else{
-        Printf("Unknown fuzzer: %s\n", FuzzerName.c_str());
-    }
-    return OutputDir;
+  std::string OutputDir;
+  if (FuzzerName == "libfuzzer" || FuzzerName == "entropic" || FuzzerName == "wingfuzz" || FuzzerName == "honggfuzz") {
+    OutputDir = CorpusDir;
+  } else if (FuzzerName == "symcc" || FuzzerName == "aflplusplus" || FuzzerName == "radamsa" || FuzzerName == "mopt" || FuzzerName == "lafintel" || FuzzerName == "redqueen" || FuzzerName == "hastefuzz") {
+    OutputDir = CorpusDir + "/default/queue";
+  } // 增加darwin,ecofuzz,fafuzz,learnperffuzz,neuzz
+  else if (FuzzerName == "afl" || FuzzerName == "aflfast" || FuzzerName == "aflgo" || FuzzerName == "fairfuzz" || FuzzerName == "darwin" || FuzzerName == "ecofuzz" || FuzzerName == "fafuzz" || FuzzerName == "moptbk" || FuzzerName == "weizz") {
+    OutputDir = CorpusDir + "/queue";
+  } else {
+    Printf("Unknown fuzzer: %s\n", FuzzerName.c_str());
+  }
+  return OutputDir;
 }
 
-std::string GetFuzzerName(std::vector<FuzzerInfo> &FuzzerStatuses, size_t JobId, std::string LogPath){
-    size_t FuzzerCount = FuzzerStatuses.size();
-    if(FuzzerCount == 0){
-        return "entropic";
-    }
-    else{
-        for(auto &Fuzzer : FuzzerStatuses){
-            if(Fuzzer.Selections == 0){
-                return Fuzzer.Name;
-            }
-        }
-        //采用UCB1算法计算选择
-        double UCB1Score = 0;
-        std::vector<double> UCB1Scores;
-        for(auto &Fuzzer : FuzzerStatuses){
-            UCB1Score = Fuzzer.Score / Fuzzer.Selections + 2 * sqrt(log(JobId) / Fuzzer.Selections);
-            UCB1Scores.push_back(UCB1Score);
-        }
-        std::vector<double> Probabilities;
-        double Sum = 0;
-        for(auto &Score : UCB1Scores){
-            Sum += Score;
-        }
-        for(auto &Score : UCB1Scores){
-            Probabilities.push_back(Score / Sum);
-        }
-        for(auto &Fuzzer : FuzzerStatuses){
-           Printf("\tFuzzerStatus: Name: %s, TotalScore: %f, Selections: %zd, UCB1Score: %f, CoveredBranches: %zd, UsedBudget: %f\n", Fuzzer.Name.c_str(), Fuzzer.Score, Fuzzer.Selections, UCB1Scores[&Fuzzer - &FuzzerStatuses[0]], Fuzzer.CoveredBranches, Fuzzer.UsedBudget);
-           //将FuzzerStatus写入LogPath
-           std::ofstream LogFile(LogPath, std::ios::app);
-           LogFile << "\tFuzzerStatus: Name: " << Fuzzer.Name << ", TotalScore: " << Fuzzer.Score << ", Selections: " << Fuzzer.Selections << ", UCB1Score: " << UCB1Scores[&Fuzzer - &FuzzerStatuses[0]] << ", CoveredBranches: " << Fuzzer.CoveredBranches << ", UsedBudget: " << Fuzzer.UsedBudget << std::endl;
-           LogFile.close();
-        }
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::discrete_distribution<> d(Probabilities.begin(), Probabilities.end());
-        return FuzzerStatuses[d(gen)].Name;
-    }
+std::string GetFuzzerName(std::vector<FuzzerInfo> &FuzzerStatuses, size_t JobId, std::string LogPath) {
+  size_t FuzzerCount = FuzzerStatuses.size();
+  if (FuzzerCount == 0) {
     return "entropic";
+  } else {
+    for (auto &Fuzzer : FuzzerStatuses) {
+      if (Fuzzer.Selections == 0) {
+        return Fuzzer.Name;
+      }
+    }
+    // 采用UCB1算法计算选择
+    double UCB1Score = 0;
+    std::vector<double> UCB1Scores;
+    for (auto &Fuzzer : FuzzerStatuses) {
+      UCB1Score = Fuzzer.Score / Fuzzer.Selections + 2 * sqrt(log(JobId) / Fuzzer.Selections);
+      UCB1Scores.push_back(UCB1Score);
+    }
+    std::vector<double> Probabilities;
+    double Sum = 0;
+    for (auto &Score : UCB1Scores) {
+      Sum += Score;
+    }
+    for (auto &Score : UCB1Scores) {
+      Probabilities.push_back(Score / Sum);
+    }
+    for (auto &Fuzzer : FuzzerStatuses) {
+      Printf("\tFuzzerStatus: Name: %s, TotalScore: %f, Selections: %zd, UCB1Score: %f, CoveredBranches: %zd, UsedBudget: %f\n", Fuzzer.Name.c_str(), Fuzzer.Score, Fuzzer.Selections, UCB1Scores[&Fuzzer - &FuzzerStatuses[0]], Fuzzer.CoveredBranches, Fuzzer.UsedBudget);
+      // 将FuzzerStatus写入LogPath
+      std::ofstream LogFile(LogPath, std::ios::app);
+      LogFile << "\tFuzzerStatus: Name: " << Fuzzer.Name << ", TotalScore: " << Fuzzer.Score << ", Selections: " << Fuzzer.Selections << ", UCB1Score: " << UCB1Scores[&Fuzzer - &FuzzerStatuses[0]] << ", CoveredBranches: " << Fuzzer.CoveredBranches << ", UsedBudget: " << Fuzzer.UsedBudget << std::endl;
+      LogFile.close();
+    }
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::discrete_distribution<> d(Probabilities.begin(), Probabilities.end());
+    return FuzzerStatuses[d(gen)].Name;
+  }
+  return "entropic";
 }
 
-double CalculateJobFeedback(FuzzJob *Job, std::vector<MergeSeedInfo> &MergeSeedCandidates, TracePC::CoverageInfo &GlobalIt){
-    double JobFeedback = 0;
-    size_t GlobalAverageHits = GlobalIt.FuncsAverageHits;
-    std::unordered_map<uintptr_t, double> FuncWeightMap;
-    for (const auto &Func : GlobalIt.FuncsInfo){
-        FuncWeightMap[Func.Id] = Func.GetWeight(GlobalAverageHits);
+double CalculateJobFeedback(FuzzJob *Job, std::vector<MergeSeedInfo> &MergeSeedCandidates, TracePC::CoverageInfo &GlobalIt) {
+  double JobFeedback = 0;
+  size_t GlobalAverageHits = GlobalIt.FuncsAverageHits;
+  std::unordered_map<uintptr_t, double> FuncWeightMap;
+  for (const auto &Func : GlobalIt.FuncsInfo) {
+    FuncWeightMap[Func.Id] = Func.GetWeight(GlobalAverageHits);
+  }
+  size_t FuncCount = 0;
+
+  for (auto &Seed : MergeSeedCandidates) {
+    double SeedWeight = 0;
+    for (auto &Func : Seed.SeedFuncs) {
+      std::string FileStr = DescribePC("%s", Func);
+      if (!IsInterestingCoverageFile(FileStr))
+        continue;
+      if (FuncWeightMap.find(Func) != FuncWeightMap.end()) {
+        JobFeedback += FuncWeightMap[Func];
+        SeedWeight += FuncWeightMap[Func];
+        FuncCount++;
+      } else {
+        JobFeedback += 100;
+        SeedWeight += 100;
+      }
     }
-    size_t FuncCount = 0;
-    
-    for (auto &Seed : MergeSeedCandidates){
-        double SeedWeight = 0;
-        for (auto &Func : Seed.SeedFuncs){
-            std::string FileStr = DescribePC("%s", Func);
-            if (!IsInterestingCoverageFile(FileStr)) continue;
-            if (FuncWeightMap.find(Func) != FuncWeightMap.end()){
-                JobFeedback += FuncWeightMap[Func];
-                SeedWeight += FuncWeightMap[Func];
-                FuncCount++;
-            }
-            else{
-                JobFeedback += 100;
-                SeedWeight += 100;
-            }
-        }
-        Seed.SortedWeight = SeedWeight;
-    }
-    if (FuncCount > 0) JobFeedback /= FuncCount;
-    return JobFeedback;
+    Seed.SortedWeight = SeedWeight;
+  }
+  if (FuncCount > 0)
+    JobFeedback /= FuncCount;
+  return JobFeedback;
 }
 
-void SortMergeSeedCandidates(std::vector<MergeSeedInfo> &MergeSeedCandidates){
-    std::sort(MergeSeedCandidates.begin(), MergeSeedCandidates.end(), [](const MergeSeedInfo &a, const MergeSeedInfo &b){
-        return a.SortedWeight > b.SortedWeight;
-    });
+void SortMergeSeedCandidates(std::vector<MergeSeedInfo> &MergeSeedCandidates) {
+  std::sort(MergeSeedCandidates.begin(), MergeSeedCandidates.end(), [](const MergeSeedInfo &a, const MergeSeedInfo &b) {
+    return a.SortedWeight > b.SortedWeight;
+  });
 }
 
 } // namespace fuzzer

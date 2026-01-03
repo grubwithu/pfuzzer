@@ -27,6 +27,8 @@ struct ConstraintGroup {
   std::string Function;
   double Importance;
   std::vector<std::vector<std::string>> Paths;
+  std::unordered_map<std::string, double> ConstraintScores;
+
 }; // From HFC
 
 // TableOfRecentCompares (TORC) remembers the most recently performed

@@ -48,6 +48,8 @@ set(LIBFUZZER_HEADERS
   FuzzerUtil.h
   FuzzerValueBitMap.h)
 
+add_definitions(-DCPPHTTPLIB_NO_EXCEPTIONS)
+
 include_directories(../../include)
 include_directories(third-party/cpp-httplib)
 include_directories(third-party/json/include)
