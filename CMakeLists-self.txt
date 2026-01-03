@@ -49,6 +49,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #   endif()
 # endif()
 
+add_definitions(-DCPPHTTPLIB_NO_EXCEPTIONS)
+
 # 包含第三方库目录
 include_directories(third-party/cpp-httplib)
 include_directories(third-party/json/include)
