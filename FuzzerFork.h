@@ -207,7 +207,7 @@ public:
                 InitArgs[0] = TargetPath;
             }
             if (FuzzerName == "libfuzzer") {
-                std::string TargetPath = DirPlusFile(CurrentPath, "ftfuzzer");
+                std::string TargetPath = DirPlusFile(CurrentPath, Target_Program);
                 InitArgs[0] = TargetPath;
             }
             Command Cmd(InitArgs);
