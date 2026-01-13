@@ -22,7 +22,8 @@ set(LIBFUZZER_SOURCES
   FuzzerUtilFuchsia.cpp
   FuzzerUtilLinux.cpp
   FuzzerUtilPosix.cpp
-  FuzzerUtilWindows.cpp)
+  FuzzerUtilWindows.cpp
+  FuzzerHFC.cpp)
 
 set(LIBFUZZER_HEADERS
   FuzzerBuiltins.h
@@ -46,7 +47,8 @@ set(LIBFUZZER_HEADERS
   FuzzerSHA1.h
   FuzzerTracePC.h
   FuzzerUtil.h
-  FuzzerValueBitMap.h)
+  FuzzerValueBitMap.h
+  FuzzerHFC.h)
 
 add_definitions(-DCPPHTTPLIB_NO_EXCEPTIONS)
 

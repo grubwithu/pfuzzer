@@ -213,3 +213,8 @@ FUZZER_FLAG_INT(fork_corpus_groups, 0, "For fork mode, enable the corpus-group "
 FUZZER_FLAG_STRING(fuzzers, "A comma-separated list of fuzzers to use to set different fuzzers, "
                   "The prerequisites are to prepare the corresponding instrumented binary and fuzzer  "
                   "such as -fuzzers=afl,libfuzzer,aflplusplus ")
+FUZZER_FLAG_INT(seed_strategy, 0, "The strategy to use for parallel fuzzing"
+  "0 for default seed strategy, 1 for corpus-based seed strategy")
+FUZZER_FLAG_INT(fuzzer_strategy, 0, "The strategy to use for parallel fuzzing"
+  "0 for random fuzzer strategy, 1 for corpus-based fuzzer strategy")
+

@@ -86,6 +86,8 @@ struct FuzzingOptions {
   bool HandleUsr1 = false;
   bool HandleUsr2 = false;
   bool HandleWinExcept = false;
+  int SeedStrategy = 0;
+  int FuzzerStrategy = 0;
 };
 
 } // namespace fuzzer

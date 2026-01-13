@@ -16,8 +16,7 @@
 #include "FuzzerSHA1.h"
 #include "FuzzerTracePC.h"
 #include "FuzzerUtil.h"
-#include "httplib.h"
-#include "nlohmann/json.hpp"
+#include "FuzzerHFC.h"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -27,23 +26,10 @@
 #include <queue>
 #include <sstream>
 #include <thread>
+#include <utility>
 
 namespace fuzzer {
 
-using json = nlohmann::json;
-httplib::Client *GetHTTPClient() {
-  static httplib::Client *Client = nullptr;
-  if (!Client) {
-    auto HfcUrl = getenv("HFC_URL");
-    if (HfcUrl) {
-      Client = new httplib::Client(HfcUrl);
-    } else {
-      std::cerr << "HFC_URL is not set, using localhost:8080" << std::endl;
-      Client = new httplib::Client("localhost", 8080);
-    }
-  }
-  return Client;
-}
 
 struct GlobalEnv {
   std::vector<std::string> Args;
@@ -73,6 +59,8 @@ struct GlobalEnv {
   std::mutex Mtx;
   std::vector<std::string> Fuzzers;
   std::vector<FuzzerInfo> FuzzerStatuses;
+  int SeedStrategy = 0;
+  int FuzzerStrategy = 0;
   // 输出一些信息到本地文本文件中
   std::string LogPath;
 
@@ -84,11 +72,12 @@ struct GlobalEnv {
         .count();
   }
 
-  std::string SelectFuzzer(
+  std::pair<int, std::string> SelectFuzzer(
       std::vector<ConstraintGroup> ConstraintGroups,
       std::unordered_map</*Fuzzer*/ std::string, std::unordered_map</*Constraint*/ std::string, double>> FuzzerScores) {
 
     std::string FuzzerName = "";
+    int index = 0;
 
     // 基于ConstraintGroups和FuzzerScores选择Fuzzer
     if (!ConstraintGroups.empty() && !FuzzerScores.empty()) {
@@ -119,17 +108,19 @@ struct GlobalEnv {
       // 根据概率随机选择一个group
       double randomValue = Rand->Rand<int>() % 1000 / 1000.0;
       double cumulativeProbability = 0.0;
-      ConstraintGroup selectedGroup;
+      ConstraintGroup *selectedGroup;
 
       for (size_t i = 0; i < ConstraintGroups.size(); i++) {
         cumulativeProbability += groupProbabilities[i];
         if (randomValue <= cumulativeProbability) {
-          selectedGroup = ConstraintGroups[i];
+          selectedGroup = &ConstraintGroups[i];
+          index = i;
           break;
         }
         // 如果没有选中，默认选择最后一个
         if (i == ConstraintGroups.size() - 1) {
-          selectedGroup = ConstraintGroups[i];
+          selectedGroup = &ConstraintGroups[i];
+          index = i;
         }
       }
 
@@ -144,7 +135,7 @@ struct GlobalEnv {
         // 计算点乘：group.constraint_score与fuzzer的约束分数
         double dotProduct = 0.0;
         for (const auto &constraint : fuzzerConstraints) {
-          for (const auto &constraint : selectedGroup.ConstraintScores) {
+          for (const auto &constraint : selectedGroup->ConstraintScores) {
             if (constraint.first == constraint.first) {
               dotProduct += constraint.second * fuzzerConstraints.at(constraint.first);
             }
@@ -193,11 +184,11 @@ struct GlobalEnv {
         }
 
         Printf("\tSelected Fuzzer: %s for Constraint Group: %s (Importance: %f)\n",
-               FuzzerName.c_str(), selectedGroup.GroupId.c_str(), selectedGroup.Importance);
+               FuzzerName.c_str(), selectedGroup->GroupId.c_str(), selectedGroup->Importance);
       }
     }
 
-    return FuzzerName;
+    return {index, FuzzerName};
   }
 
   FuzzJob *CreateNewJob(size_t JobId, GlobalCorpusInfo *GlobalCorpus, std::vector<TracePC::CoverageInfo> *CoverageInfos, ArgsInfo *AllArgsInfo) {
@@ -209,50 +200,17 @@ struct GlobalEnv {
     Job->JobId = JobId;
 
     // Get recommended function name from hfc.
-    auto &Client = *GetHTTPClient();
-    auto Res = Client.Get("/peekResult");
-    std::vector<ConstraintGroup> ConstraintGroups;
-    std::unordered_map</*Fuzzer*/ std::string, std::unordered_map</*Constraint*/ std::string, double>> FuzzerScores;
-    if (Res) {
-      if (Res->status != 200) {
-        std::cerr << "Recommend function failed: " << Res->body << std::endl;
-      }
-      auto JsonRes = json::parse(Res->body);
-      if (!JsonRes.contains("data") || !JsonRes["data"].contains("constraint_groups")) {
-        std::cerr << "peekResult reponse body is not valid, please check hfc is running correctly." << std::endl;
-      }
-      if (JsonRes["data"]["constraint_groups"].is_array()) {
-        for (auto &Group : JsonRes["data"]["constraint_groups"]) {
-          ConstraintGroup CGroup;
-          CGroup.GroupId = Group["group_id"];
-          CGroup.Function = Group["function"];
-          CGroup.Importance = Group["importance"];
-          CGroup.Paths = Group["paths"];
-          // Print CGroup.Paths
-          std::cerr << "GroupId: " << CGroup.GroupId << " Function: " << CGroup.Function << " Importance: " << CGroup.Importance << std::endl;
-          for (auto &Path : CGroup.Paths) {
-            for (auto &P : Path) {
-              std::cerr << P << " ";
-            }
-            std::cerr << std::endl;
-          }
-          ConstraintGroups.push_back(CGroup);
-        }
-      }
+    
+    auto PeekResultResponse = PeekResult();
+    auto &ConstraintGroups = PeekResultResponse->ConstraintGroups;
+    auto &FuzzerScores = PeekResultResponse->FuzzerScores;
 
-      if (JsonRes["data"]["fuzzer_scores"].is_object()) {
-        FuzzerScores = JsonRes["data"]["fuzzer_scores"];
-      }
-    }
 
+    auto [index, FuzzerName] = SelectFuzzer(ConstraintGroups, FuzzerScores);
     // 加锁
-    std::string FuzzerName = SelectFuzzer(ConstraintGroups, FuzzerScores);
-    if (FuzzerName == "")
-      FuzzerName = GetFuzzerName(FuzzerStatuses, JobId, LogPath);
-      
     {
       std::lock_guard<std::mutex> Lock(Mtx);
-      Job->FuzzerName = FuzzerName;
+      Job->FuzzerName = this->FuzzerStrategy == 0 ? GetFuzzerName(FuzzerStatuses, JobId, LogPath) : FuzzerName;
       auto it = FuzzerInfo::FindByName(FuzzerStatuses, FuzzerName);
       if (it != FuzzerStatuses.end())
         it->Selections++;
@@ -265,7 +223,7 @@ struct GlobalEnv {
     std::vector<SeedInfo *> JobSeeds;
     {
       std::lock_guard<std::mutex> Lock(Mtx);
-      JobSeeds = GlobalCorpus->GetJobSeeds(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0, ConstraintGroups);
+      JobSeeds = GlobalCorpus->GetJobSeeds(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0, this->SeedStrategy == 1 ? &ConstraintGroups[index] : nullptr);
     }
     Job->JobSeeds = JobSeeds;
     Job->LogPath = DirPlusFile(TempDir, std::to_string(JobId) + ".log");
@@ -545,7 +503,9 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
                   const std::vector<std::string> &Args,
                   const std::vector<std::string> &CorpusDirs,
                   int NumJobs, UserCallback Callback,
-                  std::vector<std::string> Fuzzers) {
+                  std::vector<std::string> Fuzzers,
+                  int SeedStrategy,
+                  int FuzzerStrategy) {
   Printf("INFO: -fork=%d: fuzzing in separate process(s)\n", NumJobs);
 
   GlobalEnv Env;
@@ -569,6 +529,12 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
       Env.FuzzerStatuses[i].UsedBudget = 0;
     }
     Printf("INFO: -fork=%d: fuzzing in separate process(s) with fuzzers: %s\n", NumJobs, Env.Fuzzers[0].c_str());
+  }
+  Env.SeedStrategy = SeedStrategy;
+  Env.FuzzerStrategy = FuzzerStrategy; 
+  if (Env.FuzzerStrategy == 1 && Env.SeedStrategy == 0) {
+    Env.SeedStrategy = 1;
+    Printf("WARNING: fuzzer_strategy is set to 1, but seed_strategy is set to 0, set seed_strategy to 1\n");
   }
   // 我想用一个Vector来存在全局的CoverageInfo和每个fuzzer的CoverageInfo
   std::vector<TracePC::CoverageInfo> CoverageInfos;

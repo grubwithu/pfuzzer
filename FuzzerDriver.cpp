@@ -740,6 +740,8 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
   Options.TraceMalloc = Flags.trace_malloc;
   Options.RssLimitMb = Flags.rss_limit_mb;
   Options.MallocLimitMb = Flags.malloc_limit_mb;
+  Options.FuzzerStrategy = Flags.fuzzer_strategy;
+  Options.SeedStrategy = Flags.seed_strategy;
   if (!Options.MallocLimitMb)
     Options.MallocLimitMb = Options.RssLimitMb;
   if (Flags.runs >= 0)
@@ -908,7 +910,8 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
   std::vector<std::string> Fuzzers = ParseFuzzers(Flags.fuzzers);
   // Printf("Fuzzers: 111\n");
   if (Flags.fork)
-    FuzzWithFork(F->GetMD().GetRand(), Options, Args, *Inputs, Flags.fork, Callback, Fuzzers);
+    FuzzWithFork(F->GetMD().GetRand(), Options, Args, *Inputs, Flags.fork, Callback,
+                 Fuzzers, Options.SeedStrategy, Options.FuzzerStrategy);
 
   if (Flags.merge || Flags.set_cover_merge)
     Merge(F, Options, Args, *Inputs, Flags.merge_control_file);
