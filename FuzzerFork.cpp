@@ -10,13 +10,13 @@
 
 #include "FuzzerFork.h"
 #include "FuzzerCommand.h"
+#include "FuzzerHFC.h"
 #include "FuzzerIO.h"
 #include "FuzzerInternal.h"
 #include "FuzzerMerge.h"
 #include "FuzzerSHA1.h"
 #include "FuzzerTracePC.h"
 #include "FuzzerUtil.h"
-#include "FuzzerHFC.h"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -29,7 +29,6 @@
 #include <utility>
 
 namespace fuzzer {
-
 
 struct GlobalEnv {
   std::vector<std::string> Args;
@@ -210,7 +209,7 @@ struct GlobalEnv {
     Job->JobId = JobId;
 
     // Get recommended function name from hfc.
-    
+
     auto PeekResultResponse = PeekResult();
     auto &ConstraintGroups = PeekResultResponse->ConstraintGroups;
     auto &FuzzerScores = PeekResultResponse->FuzzerScores;
@@ -222,7 +221,7 @@ struct GlobalEnv {
     // 加锁
     {
       std::lock_guard<std::mutex> Lock(Mtx);
-      Job->FuzzerName = FuzzerName = this->FuzzerStrategy == 0 ? GetFuzzerName(FuzzerStatuses, JobId, LogPath) : FuzzerName;
+      Job->FuzzerName = FuzzerName = this->FuzzerStrategy == 0 || FuzzerName.empty() ? GetFuzzerName(FuzzerStatuses, JobId, LogPath) : FuzzerName;
       auto it = FuzzerInfo::FindByName(FuzzerStatuses, FuzzerName);
       if (it != FuzzerStatuses.end())
         it->Selections++;
@@ -532,7 +531,7 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
     Printf("INFO: -fork=%d: fuzzing in separate process(s) with fuzzers: %s\n", NumJobs, Env.Fuzzers[0].c_str());
   }
   Env.SeedStrategy = SeedStrategy;
-  Env.FuzzerStrategy = FuzzerStrategy; 
+  Env.FuzzerStrategy = FuzzerStrategy;
   if (Env.FuzzerStrategy == 1 && Env.SeedStrategy == 0) {
     Env.SeedStrategy = 1;
     Printf("WARNING: fuzzer_strategy is set to 1, but seed_strategy is set to 0, set seed_strategy to 1\n");
