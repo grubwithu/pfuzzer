@@ -198,7 +198,7 @@ struct GlobalEnv {
       }
     }
 
-    return {index, FuzzerName};
+    return make_pair(index, FuzzerName);
   }
 
   FuzzJob *CreateNewJob(size_t JobId, GlobalCorpusInfo *GlobalCorpus, std::vector<TracePC::CoverageInfo> *CoverageInfos, ArgsInfo *AllArgsInfo) {
@@ -216,11 +216,13 @@ struct GlobalEnv {
     auto &FuzzerScores = PeekResultResponse->FuzzerScores;
     auto &FuzzerCovInc = PeekResultResponse->FuzzerCovInc;
 
-    auto [index, FuzzerName] = SelectFuzzer(ConstraintGroups, FuzzerScores, FuzzerCovInc);
+    auto Pair = SelectFuzzer(ConstraintGroups, FuzzerScores, FuzzerCovInc);
+    auto index = Pair.first;
+    auto FuzzerName = Pair.second;
     // 加锁
     {
       std::lock_guard<std::mutex> Lock(Mtx);
-      Job->FuzzerName = this->FuzzerStrategy == 0 ? GetFuzzerName(FuzzerStatuses, JobId, LogPath) : FuzzerName;
+      Job->FuzzerName = FuzzerName = this->FuzzerStrategy == 0 ? GetFuzzerName(FuzzerStatuses, JobId, LogPath) : FuzzerName;
       auto it = FuzzerInfo::FindByName(FuzzerStatuses, FuzzerName);
       if (it != FuzzerStatuses.end())
         it->Selections++;
