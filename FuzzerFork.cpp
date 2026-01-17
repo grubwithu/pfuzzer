@@ -74,7 +74,8 @@ struct GlobalEnv {
 
   std::pair<int, std::string> SelectFuzzer(
       std::vector<ConstraintGroup> ConstraintGroups,
-      std::unordered_map</*Fuzzer*/ std::string, std::unordered_map</*Constraint*/ std::string, double>> FuzzerScores) {
+      std::unordered_map</*Fuzzer*/ std::string, std::unordered_map</*Constraint*/ std::string, double>> FuzzerScores,
+      std::unordered_map</*Fuzzer*/ std::string, int> FuzzerCovInc) {
 
     std::string FuzzerName = "";
     int index = 0;
@@ -124,6 +125,14 @@ struct GlobalEnv {
         }
       }
 
+      int maxCovInc = -1;
+      for (auto &fuzzerEntry : FuzzerCovInc) {
+        if (fuzzerEntry.second > maxCovInc) {
+          maxCovInc = fuzzerEntry.second;
+          FuzzerName = fuzzerEntry.first;
+        }
+      }
+
       // 第二步：基于选中的group选择最适合的fuzzer
       // 计算每个fuzzer与该group的匹配度（点乘）
       std::vector<std::pair<std::string, double>> fuzzerScores;
@@ -142,6 +151,7 @@ struct GlobalEnv {
           }
         }
 
+        dotProduct += static_cast<double>(FuzzerCovInc[fuzzerName]) / (maxCovInc + 1.0) * 3.0;
         fuzzerScores.push_back({fuzzerName, dotProduct});
       }
 
@@ -204,9 +214,9 @@ struct GlobalEnv {
     auto PeekResultResponse = PeekResult();
     auto &ConstraintGroups = PeekResultResponse->ConstraintGroups;
     auto &FuzzerScores = PeekResultResponse->FuzzerScores;
+    auto &FuzzerCovInc = PeekResultResponse->FuzzerCovInc;
 
-
-    auto [index, FuzzerName] = SelectFuzzer(ConstraintGroups, FuzzerScores);
+    auto [index, FuzzerName] = SelectFuzzer(ConstraintGroups, FuzzerScores, FuzzerCovInc);
     // 加锁
     {
       std::lock_guard<std::mutex> Lock(Mtx);
@@ -267,18 +277,7 @@ struct GlobalEnv {
     }
     std::string LocalCorpusDir = GetLocalCorpusDir(Job->CorpusDir, Job->FuzzerName);
 
-    auto &Client = *GetHTTPClient();
-    json Body = {
-        {"fuzzer", Job->FuzzerName},
-        {"identity", Job->FuzzerName},
-        {"corpus", {LocalCorpusDir}},
-    };
-    auto Res = Client.Post("/reportCorpus", Body.dump(), "application/json");
-    if (Res) {
-      if (Res->status != 200) {
-        std::cerr << "Report corpus failed: " << Res->body << std::endl;
-      }
-    }
+    ReportCorpus(Job->FuzzerName, Job->FuzzerName, {LocalCorpusDir});
 
     std::vector<SizedFile> LocalCorpusSeeds;
     GetSizedFilesFromDir(LocalCorpusDir, &LocalCorpusSeeds);

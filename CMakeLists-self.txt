@@ -28,6 +28,7 @@ set(SRC_FILES
   FuzzerUtilWindows.cpp
   FuzzerInterceptors.cpp
   FuzzerMain.cpp
+  FuzzerHFC.cpp
 )
 
 set(CMAKE_CXX_STANDARD 17)
