@@ -38,9 +38,7 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
                   const std::vector<std::string> &Args,
                   const std::vector<std::string> &CorpusDirs,
                   int NumJobs, UserCallback Callback,
-                  std::vector<std::string> Fuzzers,
-                  int SeedStrategy,
-                  int FuzzerStrategy);
+                  std::vector<std::string> Fuzzers);
 
 struct Stats {
   size_t number_of_executed_units = 0;
@@ -446,19 +444,63 @@ public:
       }
     }
   }
+
   std::vector<SeedInfo *> GetJobSeeds(size_t SeedsNum, const std::string &FuzzerName, Random &Rand,
                                       std::vector<TracePC::CoverageInfo> &CoverageInfos, double Explore,
-                                      ConstraintGroup* selectedGroup) {
+                                      ConstraintGroup &selectedGroup) {
     // std::cout << "Getting Job Seeds for Fuzzer: " << FuzzerName << " with Seed Number: " << SeedsNum << std::endl;
     std::vector<SeedInfo *> SortedSeeds;
     std::vector<SeedInfo *> JobSeeds;
 
-    std::vector<TracePC::FuncInfo> ValueFuncsList;
-    if (selectedGroup == nullptr) {
-      ValueFuncsList = TPC.GetValueFuncsList(CoverageInfos, FuzzerName);
-    } else {
-      ValueFuncsList = TPC.GetValueFuncsList(CoverageInfos, FuzzerName, *selectedGroup);
+    std::vector<TracePC::FuncInfo> ValueFuncsList = TPC.GetValueFuncsList(CoverageInfos, FuzzerName, selectedGroup);
+
+    // std::cout << "Value Functions List Size: " << ValueFuncsList.size() << std::endl;
+    CalculateSeedWeight(ValueFuncsList, CoverageInfos, FuzzerName);
+    // std::cout << "Calculated Seed Scores with Explore factor: " << Explore << std::endl;
+    for (auto SI : Inputs) {
+      if (SI->Live)
+        SortedSeeds.push_back(SI);
     }
+    // std::cout << "Number of Live Seeds: " << SortedSeeds.size() << std::endl;
+    std::sort(SortedSeeds.begin(), SortedSeeds.end(), [](SeedInfo *a, SeedInfo *b) {
+      return a->Energy < b->Energy;
+    });
+
+    size_t loop_count = 0;
+    while (JobSeeds.size() < SeedsNum) {
+      loop_count++;
+      if (loop_count > 3 * SortedSeeds.size())
+        break;
+      if (SortedSeeds.empty())
+        break;
+      size_t Index = Rand.SkewTowardsLast(SortedSeeds.size());
+      if (SortedSeeds[Index]->Locked)
+        continue;
+      SortedSeeds[Index]->Selections++;
+      SortedSeeds[Index]->Locked = true;
+      JobSeeds.push_back(SortedSeeds[Index]);
+      // std::cout << "Selected Seed: " << SortedSeeds[Index]->File << " with UCB1 Score: " << SortedSeeds[Index]->UCB1Score << std::endl;
+    }
+    if (JobSeeds.size() <= 1) {
+      std::cerr << "No enough seeds selected, using random live seeds." << std::endl;
+      for (size_t i = 0; i < SeedsNum; i++) {
+        size_t Index = Rand.SkewTowardsLast(SortedSeeds.size());
+        SortedSeeds[Index]->Selections++;
+        SortedSeeds[Index]->Locked = true;
+        JobSeeds.push_back(SortedSeeds[Index]);
+      }
+    }
+    // std::cout << "Total Job Seeds Selected: " << JobSeeds.size() << std::endl;
+    return JobSeeds;
+  }
+
+  std::vector<SeedInfo *> GetJobSeeds(size_t SeedsNum, const std::string &FuzzerName, Random &Rand,
+                                      std::vector<TracePC::CoverageInfo> &CoverageInfos, double Explore) {
+    // std::cout << "Getting Job Seeds for Fuzzer: " << FuzzerName << " with Seed Number: " << SeedsNum << std::endl;
+    std::vector<SeedInfo *> SortedSeeds;
+    std::vector<SeedInfo *> JobSeeds;
+
+    std::vector<TracePC::FuncInfo> ValueFuncsList = TPC.GetValueFuncsList(CoverageInfos, FuzzerName);
     // std::cout << "Value Functions List Size: " << ValueFuncsList.size() << std::endl;
     CalculateSeedWeight(ValueFuncsList, CoverageInfos, FuzzerName);
     CalculateSeedScore(Explore);

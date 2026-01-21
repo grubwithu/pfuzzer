@@ -71,13 +71,13 @@ struct GlobalEnv {
         .count();
   }
 
-  std::pair<int, std::string> SelectFuzzer(
+  std::pair<size_t, std::string> SelectFuzzer(
       std::vector<ConstraintGroup> ConstraintGroups,
       std::unordered_map</*Fuzzer*/ std::string, std::unordered_map</*Constraint*/ std::string, double>> FuzzerScores,
       std::unordered_map</*Fuzzer*/ std::string, int> FuzzerCovInc) {
 
     std::string FuzzerName = "";
-    int index = 0;
+    size_t index = 0;
 
     // 基于ConstraintGroups和FuzzerScores选择Fuzzer
     if (!ConstraintGroups.empty() && !FuzzerScores.empty()) {
@@ -192,8 +192,8 @@ struct GlobalEnv {
           }
         }
 
-        Printf("\tSelected Fuzzer: %s for Constraint Group: %s (Importance: %f)\n",
-               FuzzerName.c_str(), selectedGroup->GroupId.c_str(), selectedGroup->Importance);
+        // Printf("\tSelected Fuzzer: %s for Constraint Group: %s (Importance: %f)\n",
+        //        FuzzerName.c_str(), selectedGroup->GroupId.c_str(), selectedGroup->Importance);
       }
     }
 
@@ -215,13 +215,21 @@ struct GlobalEnv {
     auto &FuzzerScores = PeekResultResponse->FuzzerScores;
     auto &FuzzerCovInc = PeekResultResponse->FuzzerCovInc;
 
-    auto Pair = SelectFuzzer(ConstraintGroups, FuzzerScores, FuzzerCovInc);
-    auto index = Pair.first;
-    auto FuzzerName = Pair.second;
+    size_t index = 0;
+    std::string FuzzerName = "";
+    if (SeedStrategy == 1) {
+      auto Pair = SelectFuzzer(ConstraintGroups, FuzzerScores, FuzzerCovInc);
+      index = Pair.first;
+      Log("Select Constraint Group: " + ConstraintGroups[index].GroupId + ", Main Function is " + ConstraintGroups[index].Function);
+      if (FuzzerStrategy == 1) {
+        FuzzerName = Pair.second;
+        Log("Select Fuzzer: " + FuzzerName);
+      }
+    }
     // 加锁
     {
       std::lock_guard<std::mutex> Lock(Mtx);
-      Job->FuzzerName = FuzzerName = this->FuzzerStrategy == 0 || FuzzerName.empty() ? GetFuzzerName(FuzzerStatuses, JobId, LogPath) : FuzzerName;
+      Job->FuzzerName = FuzzerName = FuzzerName.empty() ? GetFuzzerName(FuzzerStatuses, JobId, LogPath) : FuzzerName;
       auto it = FuzzerInfo::FindByName(FuzzerStatuses, FuzzerName);
       if (it != FuzzerStatuses.end())
         it->Selections++;
@@ -234,7 +242,11 @@ struct GlobalEnv {
     std::vector<SeedInfo *> JobSeeds;
     {
       std::lock_guard<std::mutex> Lock(Mtx);
-      JobSeeds = GlobalCorpus->GetJobSeeds(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0, this->SeedStrategy == 1 ? &ConstraintGroups[index] : nullptr);
+      if (SeedStrategy == 0) {
+        JobSeeds = GlobalCorpus->GetJobSeeds(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0);
+      } else if (SeedStrategy == 1) {
+        JobSeeds = GlobalCorpus->GetJobSeeds(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0, ConstraintGroups[index]);
+      }
     }
     Job->JobSeeds = JobSeeds;
     Job->LogPath = DirPlusFile(TempDir, std::to_string(JobId) + ".log");
@@ -503,9 +515,7 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
                   const std::vector<std::string> &Args,
                   const std::vector<std::string> &CorpusDirs,
                   int NumJobs, UserCallback Callback,
-                  std::vector<std::string> Fuzzers,
-                  int SeedStrategy,
-                  int FuzzerStrategy) {
+                  std::vector<std::string> Fuzzers) {
   Printf("INFO: -fork=%d: fuzzing in separate process(s)\n", NumJobs);
 
   GlobalEnv Env;
@@ -530,8 +540,8 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
     }
     Printf("INFO: -fork=%d: fuzzing in separate process(s) with fuzzers: %s\n", NumJobs, Env.Fuzzers[0].c_str());
   }
-  Env.SeedStrategy = SeedStrategy;
-  Env.FuzzerStrategy = FuzzerStrategy;
+  Env.SeedStrategy = Options.SeedStrategy;
+  Env.FuzzerStrategy = Options.FuzzerStrategy;
   if (Env.FuzzerStrategy == 1 && Env.SeedStrategy == 0) {
     Env.SeedStrategy = 1;
     Printf("WARNING: fuzzer_strategy is set to 1, but seed_strategy is set to 0, set seed_strategy to 1\n");

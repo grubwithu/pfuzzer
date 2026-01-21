@@ -24,6 +24,7 @@ struct PeekResultResponce {
 
 std::unique_ptr<PeekResultResponce> PeekResult();
 void ReportCorpus(std::string FuzzerName, std::string Identity, std::vector<std::string> Corpus);
+void Log(std::string Log);
 
 } // namespace fuzzer
 

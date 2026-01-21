@@ -55,7 +55,6 @@ std::unique_ptr<PeekResultResponce> PeekResult() {
     if (JsonRes["data"]["fuzzer_cov_inc"].is_object()) {
       response->FuzzerCovInc = JsonRes["data"]["fuzzer_cov_inc"];
     }
-
   }
   return response;
 }
@@ -71,6 +70,19 @@ void ReportCorpus(std::string FuzzerName, std::string Identity, std::vector<std:
   if (Res) {
     if (Res->status != 200) {
       std::cerr << "Report corpus failed: " << Res->body << std::endl;
+    }
+  }
+}
+
+void Log(std::string Log) {
+  auto &Client = *GetHTTPClient();
+  json Body = {
+      {"log", Log},
+  };
+  auto Res = Client.Post("/log", Body.dump(), "application/json");
+  if (Res) {
+    if (Res->status != 200) {
+      std::cerr << "Log failed: " << Res->body << std::endl;
     }
   }
 }
