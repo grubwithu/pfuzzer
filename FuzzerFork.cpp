@@ -217,11 +217,11 @@ struct GlobalEnv {
 
     size_t index = 0;
     std::string FuzzerName = "";
-    if (SeedStrategy == 1) {
+    if (SeedStrategy == 1 && !ConstraintGroups.empty()) {
       auto Pair = SelectFuzzer(ConstraintGroups, FuzzerScores, FuzzerCovInc);
       index = Pair.first;
       Log("Select Constraint Group: " + ConstraintGroups[index].GroupId + ", Main Function is " + ConstraintGroups[index].Function);
-      if (FuzzerStrategy == 1) {
+      if (FuzzerStrategy == 1 && !FuzzerScores.empty()) {
         FuzzerName = Pair.second;
         Log("Select Fuzzer: " + FuzzerName);
       }
