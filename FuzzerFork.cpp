@@ -244,8 +244,10 @@ struct GlobalEnv {
       std::lock_guard<std::mutex> Lock(Mtx);
       if (SeedStrategy == 0) {
         JobSeeds = GlobalCorpus->GetJobSeeds(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0);
-      } else if (SeedStrategy == 1) {
+      } else if (SeedStrategy == 1 && !ConstraintGroups.empty()) {
         JobSeeds = GlobalCorpus->GetJobSeeds(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0, ConstraintGroups[index]);
+      } else {
+        JobSeeds = GlobalCorpus->GetJobSeeds(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0);
       }
     }
     Job->JobSeeds = JobSeeds;
