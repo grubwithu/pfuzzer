@@ -742,6 +742,7 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
   Options.MallocLimitMb = Flags.malloc_limit_mb;
   Options.FuzzerStrategy = Flags.fuzzer_strategy;
   Options.SeedStrategy = Flags.seed_strategy;
+  Options.StrategyThreshold = Flags.strategy_threshold;
   if (!Options.MallocLimitMb)
     Options.MallocLimitMb = Options.RssLimitMb;
   if (Flags.runs >= 0)

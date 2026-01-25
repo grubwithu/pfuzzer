@@ -213,8 +213,10 @@ FUZZER_FLAG_INT(fork_corpus_groups, 0, "For fork mode, enable the corpus-group "
 FUZZER_FLAG_STRING(fuzzers, "A comma-separated list of fuzzers to use to set different fuzzers, "
                   "The prerequisites are to prepare the corresponding instrumented binary and fuzzer  "
                   "such as -fuzzers=afl,libfuzzer,aflplusplus ")
-FUZZER_FLAG_INT(seed_strategy, 0, "The strategy to use for parallel fuzzing"
-  "0 for default seed strategy, 1 for corpus-based seed strategy")
-FUZZER_FLAG_INT(fuzzer_strategy, 0, "The strategy to use for parallel fuzzing"
-  "0 for random fuzzer strategy, 1 for corpus-based fuzzer strategy")
-
+FUZZER_FLAG_UNSIGNED(seed_strategy, 2, "The strategy to use for parallel fuzzing. Bitwise OR of "
+  "1 for new seed strategy, 2 for UCB1 seed strategy, 4 for corpus-based seed strategy")
+FUZZER_FLAG_UNSIGNED(fuzzer_strategy, 2, "The strategy to use for parallel fuzzing. Bitwise OR of "
+  "1 for random fuzzer strategy, 2 for UCB1 fuzzer strategy, 4 for corpus-based fuzzer strategy")
+FUZZER_FLAG_UNSIGNED(strategy_threshold, 120, "If there are two 1s in the binary of seed_strategy or fuzzer_strategy, hybrid stragety is active. "
+                "pfuzzer will use lower bit strategy for the first strategy_threshold MINUTES, "
+                "and use higher bit strategy for the rest of the time.")

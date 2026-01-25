@@ -34,6 +34,14 @@
 
 namespace fuzzer {
 
+constexpr size_t SEED_STRATEGY_NEW = 0x1;
+constexpr size_t SEED_STRATEGY_UCB1 = 0x2;
+constexpr size_t SEED_STRATEGY_CORPUS = 0x4;
+
+constexpr size_t FUZZER_STRATEGY_RANDOM = 0x1;
+constexpr size_t FUZZER_STRATEGY_UCB1 = 0x2;
+constexpr size_t FUZZER_STRATEGY_CORPUS = 0x4;
+
 void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
                   const std::vector<std::string> &Args,
                   const std::vector<std::string> &CorpusDirs,
@@ -153,7 +161,8 @@ void CopyMultipleFiles(const std::vector<SeedInfo *> &JobSeeds, const std::strin
 std::string GetExeDirName();
 std::string GetBaseName(const std::string &path);
 std::string GetLocalCorpusDir(const std::string &CorpusDir, const std::string &FuzzerName);
-std::string GetFuzzerName(std::vector<FuzzerInfo> &FuzzerStatuses, size_t JobId, std::string LogPath);
+std::string GetFuzzerNameUCB1(std::vector<FuzzerInfo> &FuzzerStatuses, size_t JobId, std::string LogPath);
+std::string GetFuzzerNameRound(std::vector<FuzzerInfo> &FuzzerStatuses);
 
 class ArgsInfo {
 private:
@@ -445,9 +454,9 @@ public:
     }
   }
 
-  std::vector<SeedInfo *> GetJobSeeds(size_t SeedsNum, const std::string &FuzzerName, Random &Rand,
-                                      std::vector<TracePC::CoverageInfo> &CoverageInfos, double Explore,
-                                      ConstraintGroup &selectedGroup) {
+  std::vector<SeedInfo *> GetJobSeedsConstraint(size_t SeedsNum, const std::string &FuzzerName, Random &Rand,
+                                                std::vector<TracePC::CoverageInfo> &CoverageInfos, double Explore,
+                                                ConstraintGroup &selectedGroup) {
     // std::cout << "Getting Job Seeds for Fuzzer: " << FuzzerName << " with Seed Number: " << SeedsNum << std::endl;
     std::vector<SeedInfo *> SortedSeeds;
     std::vector<SeedInfo *> JobSeeds;
@@ -494,8 +503,55 @@ public:
     return JobSeeds;
   }
 
-  std::vector<SeedInfo *> GetJobSeeds(size_t SeedsNum, const std::string &FuzzerName, Random &Rand,
-                                      std::vector<TracePC::CoverageInfo> &CoverageInfos, double Explore) {
+  std::vector<SeedInfo *> GetJobSeedsUCB1(size_t SeedsNum, const std::string &FuzzerName, Random &Rand,
+                                          std::vector<TracePC::CoverageInfo> &CoverageInfos, double Explore) {
+    // std::cout << "Getting Job Seeds for Fuzzer: " << FuzzerName << " with Seed Number: " << SeedsNum << std::endl;
+    std::vector<SeedInfo *> SortedSeeds;
+    std::vector<SeedInfo *> JobSeeds;
+
+    std::vector<TracePC::FuncInfo> ValueFuncsList = TPC.GetValueFuncsList(CoverageInfos, FuzzerName);
+    // std::cout << "Value Functions List Size: " << ValueFuncsList.size() << std::endl;
+    CalculateSeedWeight(ValueFuncsList, CoverageInfos, FuzzerName);
+    CalculateSeedScore(Explore);
+    // std::cout << "Calculated Seed Scores with Explore factor: " << Explore << std::endl;
+    for (auto SI : Inputs) {
+      if (SI->Live)
+        SortedSeeds.push_back(SI);
+    }
+    // std::cout << "Number of Live Seeds: " << SortedSeeds.size() << std::endl;
+    std::sort(SortedSeeds.begin(), SortedSeeds.end(), [](SeedInfo *a, SeedInfo *b) {
+      return a->UCB1Score < b->UCB1Score;
+    });
+    size_t loop_count = 0;
+    while (JobSeeds.size() < SeedsNum) {
+      loop_count++;
+      if (loop_count > 3 * SortedSeeds.size())
+        break;
+      if (SortedSeeds.empty())
+        break;
+      size_t Index = Rand.SkewTowardsLast(SortedSeeds.size());
+      if (SortedSeeds[Index]->Locked)
+        continue;
+      SortedSeeds[Index]->Selections++;
+      SortedSeeds[Index]->Locked = true;
+      JobSeeds.push_back(SortedSeeds[Index]);
+      // std::cout << "Selected Seed: " << SortedSeeds[Index]->File << " with UCB1 Score: " << SortedSeeds[Index]->UCB1Score << std::endl;
+    }
+    if (JobSeeds.size() <= 1) {
+      std::cerr << "No enough seeds selected, using random live seeds." << std::endl;
+      for (size_t i = 0; i < SeedsNum; i++) {
+        size_t Index = Rand.SkewTowardsLast(SortedSeeds.size());
+        SortedSeeds[Index]->Selections++;
+        SortedSeeds[Index]->Locked = true;
+        JobSeeds.push_back(SortedSeeds[Index]);
+      }
+    }
+    // std::cout << "Total Job Seeds Selected: " << JobSeeds.size() << std::endl;
+    return JobSeeds;
+  }
+
+  std::vector<SeedInfo *> GetJobSeedsNew(size_t SeedsNum, const std::string &FuzzerName, Random &Rand,
+                                         std::vector<TracePC::CoverageInfo> &CoverageInfos, double Explore) {
     // std::cout << "Getting Job Seeds for Fuzzer: " << FuzzerName << " with Seed Number: " << SeedsNum << std::endl;
     std::vector<SeedInfo *> SortedSeeds;
     std::vector<SeedInfo *> JobSeeds;

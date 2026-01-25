@@ -30,6 +30,16 @@
 
 namespace fuzzer {
 
+static inline size_t BitCount(size_t x) {
+  size_t count = 0;
+  while (x) {
+    size_t cur = x & 0x1;
+    count += cur;
+    x = x >> 1;
+  }
+  return count;
+}
+
 struct GlobalEnv {
   std::vector<std::string> Args;
   std::vector<std::string> CorpusDirs;
@@ -58,8 +68,9 @@ struct GlobalEnv {
   std::mutex Mtx;
   std::vector<std::string> Fuzzers;
   std::vector<FuzzerInfo> FuzzerStatuses;
-  int SeedStrategy = 0;
-  int FuzzerStrategy = 0;
+  size_t SeedStrategy = 0;
+  size_t FuzzerStrategy = 0;
+  size_t StrategyThreshold = 120;
   // 输出一些信息到本地文本文件中
   std::string LogPath;
 
@@ -126,8 +137,9 @@ struct GlobalEnv {
 
       int maxCovInc = -1;
       for (auto &fuzzerEntry : FuzzerCovInc) {
-        if (fuzzerEntry.second > maxCovInc) {
-          maxCovInc = fuzzerEntry.second;
+        int absInc = std::abs(fuzzerEntry.second);
+        if (absInc > maxCovInc) {
+          maxCovInc = absInc;
           FuzzerName = fuzzerEntry.first;
         }
       }
@@ -200,6 +212,21 @@ struct GlobalEnv {
     return make_pair(index, FuzzerName);
   }
 
+  size_t GetCurStrategy(size_t Strategy, size_t PassedMinutes) {
+    if (BitCount(Strategy) == 1) {
+      return Strategy;
+    } else if (BitCount(Strategy) == 2) {
+      if (PassedMinutes > StrategyThreshold) {
+        return Strategy & (Strategy - 1); // clear the lower bit
+      } else {
+        return Strategy & (~Strategy - 1); // clear the higher bit
+      }
+    } else {
+      Printf("ERROR: Strategy %d is not supported\n", Strategy);
+      exit(0);
+    }
+  }
+
   FuzzJob *CreateNewJob(size_t JobId, GlobalCorpusInfo *GlobalCorpus, std::vector<TracePC::CoverageInfo> *CoverageInfos, ArgsInfo *AllArgsInfo) {
     // COV or Crash
     // Select a fuzzer
@@ -208,28 +235,53 @@ struct GlobalEnv {
     auto Job = new FuzzJob;
     Job->JobId = JobId;
 
-    // Get recommended function name from hfc.
+    auto CurTime = std::chrono::system_clock::now();
+    auto PassedMinutes = std::chrono::duration_cast<std::chrono::minutes>(CurTime.time_since_epoch()).count();
 
-    auto PeekResultResponse = PeekResult();
-    auto &ConstraintGroups = PeekResultResponse->ConstraintGroups;
-    auto &FuzzerScores = PeekResultResponse->FuzzerScores;
-    auto &FuzzerCovInc = PeekResultResponse->FuzzerCovInc;
+    size_t CurSeedStrategy = GetCurStrategy(SeedStrategy, PassedMinutes);
+    size_t CurFuzzerStrategy = GetCurStrategy(FuzzerStrategy, PassedMinutes);
 
-    size_t index = 0;
     std::string FuzzerName = "";
-    if (SeedStrategy == 1 && !ConstraintGroups.empty()) {
-      auto Pair = SelectFuzzer(ConstraintGroups, FuzzerScores, FuzzerCovInc);
-      index = Pair.first;
-      Log("Select Constraint Group: " + ConstraintGroups[index].GroupId + ", Main Function is " + ConstraintGroups[index].Function);
-      if (FuzzerStrategy == 1 && !FuzzerScores.empty()) {
-        FuzzerName = Pair.second;
-        Log("Select Fuzzer: " + FuzzerName);
+    ConstraintGroup selectedGroup;
+    if (CurSeedStrategy & SEED_STRATEGY_CORPUS || CurFuzzerStrategy & FUZZER_STRATEGY_CORPUS) {
+      // Get recommended function name from hfc.
+      auto PeekResultResponse = PeekResult();
+      auto &ConstraintGroups = PeekResultResponse->ConstraintGroups;
+      auto &FuzzerScores = PeekResultResponse->FuzzerScores;
+      auto &FuzzerCovInc = PeekResultResponse->FuzzerCovInc;
+
+      if (ConstraintGroups.empty()) {
+        CurSeedStrategy = SEED_STRATEGY_UCB1;
+        CurFuzzerStrategy = FUZZER_STRATEGY_UCB1;
+      } else {
+        if (FuzzerScores.empty()) {
+          CurFuzzerStrategy = FUZZER_STRATEGY_UCB1;
+        }
+        
+        auto ResPair = SelectFuzzer(ConstraintGroups, FuzzerScores, FuzzerCovInc);
+        selectedGroup = ConstraintGroups[ResPair.first];
+        FuzzerName = ResPair.second;
       }
     }
-    // 加锁
+
+    // 加锁 Question: Why do we need to lock here?
     {
       std::lock_guard<std::mutex> Lock(Mtx);
-      Job->FuzzerName = FuzzerName = FuzzerName.empty() ? GetFuzzerName(FuzzerStatuses, JobId, LogPath) : FuzzerName;
+      switch (CurFuzzerStrategy) {
+      case FUZZER_STRATEGY_RANDOM:
+        FuzzerName = GetFuzzerNameRound(FuzzerStatuses);
+        break;
+      case FUZZER_STRATEGY_UCB1:
+        FuzzerName = GetFuzzerNameUCB1(FuzzerStatuses, JobId, LogPath);
+        break;
+      case FUZZER_STRATEGY_CORPUS:
+        break;
+      default:
+        Printf("ERROR: FuzzerStrategy %d is not supported\n", CurFuzzerStrategy);
+        exit(0);
+      }
+      Job->FuzzerName = FuzzerName;
+      Printf("Selected Fuzzer: %s\n", FuzzerName.c_str());
       auto it = FuzzerInfo::FindByName(FuzzerStatuses, FuzzerName);
       if (it != FuzzerStatuses.end())
         it->Selections++;
@@ -242,12 +294,19 @@ struct GlobalEnv {
     std::vector<SeedInfo *> JobSeeds;
     {
       std::lock_guard<std::mutex> Lock(Mtx);
-      if (SeedStrategy == 0) {
-        JobSeeds = GlobalCorpus->GetJobSeeds(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0);
-      } else if (SeedStrategy == 1 && !ConstraintGroups.empty()) {
-        JobSeeds = GlobalCorpus->GetJobSeeds(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0, ConstraintGroups[index]);
-      } else {
-        JobSeeds = GlobalCorpus->GetJobSeeds(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0);
+      switch (CurSeedStrategy) {
+      case SEED_STRATEGY_NEW:
+        JobSeeds = GlobalCorpus->GetJobSeedsNew(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0);
+        break;
+      case SEED_STRATEGY_UCB1:
+        JobSeeds = GlobalCorpus->GetJobSeedsUCB1(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0);
+        break;
+      case SEED_STRATEGY_CORPUS:
+        JobSeeds = GlobalCorpus->GetJobSeedsConstraint(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0, selectedGroup);
+        break;
+      default:
+        Printf("ERROR: SeedStrategy %d is not supported\n", CurSeedStrategy);
+        exit(0);
       }
     }
     Job->JobSeeds = JobSeeds;
@@ -544,10 +603,7 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
   }
   Env.SeedStrategy = Options.SeedStrategy;
   Env.FuzzerStrategy = Options.FuzzerStrategy;
-  if (Env.FuzzerStrategy == 1 && Env.SeedStrategy == 0) {
-    Env.SeedStrategy = 1;
-    Printf("WARNING: fuzzer_strategy is set to 1, but seed_strategy is set to 0, set seed_strategy to 1\n");
-  }
+  Env.StrategyThreshold = Options.StrategyThreshold;
   // 我想用一个Vector来存在全局的CoverageInfo和每个fuzzer的CoverageInfo
   std::vector<TracePC::CoverageInfo> CoverageInfos;
   if (Fuzzers.size() > 1) {
@@ -865,7 +921,14 @@ std::string GetLocalCorpusDir(const std::string &CorpusDir, const std::string &F
   return OutputDir;
 }
 
-std::string GetFuzzerName(std::vector<FuzzerInfo> &FuzzerStatuses, size_t JobId, std::string LogPath) {
+std::string GetFuzzerNameRound(std::vector<FuzzerInfo> &FuzzerStatuses) {
+  static size_t Count = 0;
+  size_t Index = Count % FuzzerStatuses.size();
+  Count++;
+  return FuzzerStatuses[Index].Name;
+}
+
+std::string GetFuzzerNameUCB1(std::vector<FuzzerInfo> &FuzzerStatuses, size_t JobId, std::string LogPath) {
   size_t FuzzerCount = FuzzerStatuses.size();
   if (FuzzerCount == 0) {
     return "entropic";
