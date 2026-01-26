@@ -216,11 +216,20 @@ struct GlobalEnv {
     if (BitCount(Strategy) == 1) {
       return Strategy;
     } else if (BitCount(Strategy) == 2) {
+      size_t res;
       if (PassedMinutes > StrategyThreshold) {
-        return Strategy & (Strategy - 1); // clear the lower bit
+        res = 0x1000;
+        while ((res & Strategy) == 0) {
+          res >>= 1;
+        }
       } else {
-        return Strategy & (~Strategy - 1); // clear the higher bit
+        res = 0x0001;
+        while ((res & Strategy) == 0) {
+          res <<= 1;
+        }
       }
+      Log("PassedMinutes " + std::to_string(PassedMinutes) + ", Strategy " + std::to_string(res));
+      return res;
     } else {
       Printf("ERROR: Strategy %d is not supported\n", Strategy);
       exit(0);
@@ -236,7 +245,7 @@ struct GlobalEnv {
     Job->JobId = JobId;
 
     auto CurTime = std::chrono::system_clock::now();
-    auto PassedMinutes = std::chrono::duration_cast<std::chrono::minutes>(CurTime.time_since_epoch()).count();
+    auto PassedMinutes = std::chrono::duration_cast<std::chrono::minutes>(CurTime - ProcessStartTime).count();
 
     size_t CurSeedStrategy = GetCurStrategy(SeedStrategy, PassedMinutes);
     size_t CurFuzzerStrategy = GetCurStrategy(FuzzerStrategy, PassedMinutes);
