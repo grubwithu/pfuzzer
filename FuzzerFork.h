@@ -190,7 +190,7 @@ public:
         {"ecofuzz", {CurrentPath + "/ecofuzz/afl-fuzz", "-m", "none", "-t", "1000+", "-d"}},
         {"fafuzz", {CurrentPath + "/fafuzz/afl-fuzz", "-m", "none", "-t", "1000+", "-d"}},
         {"fairfuzz", {CurrentPath + "/fairfuzz/afl-fuzz", "-m", "none", "-d", "-t", "1000+"}},
-        {"aflfast", {CurrentPath + "/aflfast/afl-fuzz", "-m", "none", "-d", "-t", "1000+"}},
+        {"aflfast", {CurrentPath + "/aflfast/afl-fuzz", "-m", "none", "-t", "1000+", "-d", "--"}},
         {"qsym", {"python2", CurrentPath + "/qsym/bin/run_qsym_afl.py"}},
         {"hastefuzz", {CurrentPath + "/hastefuzz/afl-fuzz", "-p", "fast", "-L", "0", "-t", "1000+", "-x", CurrentPath + "/hastefuzz/afl++.dict", "-c", CurrentPath + "/hastefuzz/cmplog/" + Target_Program, "-l", "2", "-u", "0"}},
         {"honggfuzz", {CurrentPath + "/honggfuzz/honggfuzz", "--persistent", "--rlimit_rss", "2048", "--sanitizers_del_report=true", "--"}},
@@ -263,11 +263,11 @@ public:
         InitArgs.insert(InitArgs.begin() + 2, FuzzJob.InputDir);
         InitArgs.insert(InitArgs.begin() + 3, "-o");
         InitArgs.insert(InitArgs.begin() + 4, FuzzJob.CorpusDir);
-        printf("fuzz name: %s\n", FuzzerName.c_str());
-        if ((FuzzerName != "aflfast") && (FuzzerName != "aflgo")) {
-          InitArgs.insert(InitArgs.begin() + 5, "-V");
-          InitArgs.insert(InitArgs.begin() + 6, FuzzJob.JobBudget);
-        }
+        printf("fuzzer name: %s\n", FuzzerName.c_str());
+        // if ((FuzzerName != "aflfast") && (FuzzerName != "aflgo")) {
+        InitArgs.insert(InitArgs.begin() + 5, "-V");
+        InitArgs.insert(InitArgs.begin() + 6, FuzzJob.JobBudget);
+        // }
 
         // 最后一个参数，输入binary路径
         InitArgs.push_back(TargetPath);

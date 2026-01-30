@@ -574,7 +574,7 @@ struct JobQueue {
 
 void WorkerThread(JobQueue *FuzzQ, JobQueue *MergeQ) {
   while (auto Job = FuzzQ->Pop()) {
-    // Printf("WorkerThread: job %p\n", Job);
+    // Printf("WorkerThread: job %d: %s\n", Job->JobId, Job->FuzzerName.c_str());
     Job->ExitCode = ExecuteCommand(Job->Cmd);
     MergeQ->Push(Job);
   }
