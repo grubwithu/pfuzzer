@@ -2,7 +2,6 @@
 #ifndef FUZZER_HFC_H
 #define FUZZER_HFC_H
 
-#include "FuzzerTracePC.h"
 #include "httplib.h"
 #include "nlohmann/json.hpp"
 #include <memory>
@@ -11,6 +10,16 @@
 #include <string>
 
 namespace fuzzer {
+
+struct ConstraintGroup {
+  std::string GroupId;
+  std::string Function;
+  double Importance;
+  std::vector<std::vector<std::string>> Paths;
+  std::unordered_map<std::string, double> ConstraintScores;
+
+}; // From HFC
+
 
 using json = nlohmann::json;
 

@@ -14,6 +14,7 @@
 #include "FuzzerDefs.h"
 #include "FuzzerDictionary.h"
 #include "FuzzerValueBitMap.h"
+#include "FuzzerHFC.h"
 
 #include <cmath>
 #include <iostream>
@@ -21,16 +22,6 @@
 #include <unordered_map>
 
 namespace fuzzer {
-
-struct ConstraintGroup {
-  std::string GroupId;
-  std::string Function;
-  double Importance;
-  std::vector<std::vector<std::string>> Paths;
-  std::unordered_map<std::string, double> ConstraintScores;
-
-}; // From HFC
-
 // TableOfRecentCompares (TORC) remembers the most recently performed
 // comparisons of type T.
 // We record the arguments of CMP instructions in this table unconditionally
@@ -107,11 +98,11 @@ public:
       if (UncoverSize > 0) {
         double FrequencyPenalty = 1 / (1 + log(1 + RelativeFrequency));
         if (sqrtHits > LowFrequencyThreshold)
-          return 4 * UncoverSize * FrequencyPenalty;
+          return 10 * UncoverSize * FrequencyPenalty;
         else
-          return 40 * UncoverSize * FrequencyPenalty;
+          return 80 * UncoverSize * FrequencyPenalty;
       }
-      return 2;
+      return 4;
     }
 
     bool operator==(const FuncInfo &other) const {
@@ -160,37 +151,6 @@ public:
     return FuncCount > 0 ? TotalHits / FuncCount : 0;
   }
 
-  // TODO: Create a copy of GetValueFuncsList and make compatible with hfc.  
-  std::vector<FuncInfo> GetValueFuncsList(std::vector<CoverageInfo> &CoverageInfos, std::string FuzzerName,
-                                          ConstraintGroup &ConstraintGroup) {
-    std::vector<FuncInfo> ValueFuncsList;
-
-    for (const auto &Func : CoverageInfos[0].FuncsInfo) {
-      auto FuncName = DescribePC("%F", Func.Id);
-      if (FuncName.find_first_of("in") == 0) {
-        FuncName = FuncName.substr(3);
-      } else {
-        continue;
-      }
-      if (FuncName == ConstraintGroup.Function) {
-        auto NewFunc = Func;
-        NewFunc.Weight = 1000;
-        ValueFuncsList.push_back(NewFunc);
-        continue;
-      }
-
-      for (const auto &Path : ConstraintGroup.Paths) {
-        if (std::find(Path.begin(), Path.end(), FuncName) != Path.end()) {
-          auto NewFunc = Func;
-          NewFunc.Weight = 50;
-          ValueFuncsList.push_back(NewFunc);
-          break;
-        }
-      }
-    }
-    std::cerr << "Total Value Functions: " << ValueFuncsList.size() << std::endl;
-    return ValueFuncsList;
-  }
   // 低频函数识别
   std::vector<FuncInfo> GetValueFuncsList(std::vector<CoverageInfo> &CoverageInfos, std::string FuzzerName) {
     // std::cout << "Getting Value Functions List for Fuzzer: " << FuzzerName << std::endl;

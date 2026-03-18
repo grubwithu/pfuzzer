@@ -3,3 +3,5 @@
 libFuzzer.a
 
 build/
+
+.cache/

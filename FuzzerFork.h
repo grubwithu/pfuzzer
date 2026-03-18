@@ -433,6 +433,94 @@ public:
       }
     }
   }
+  // 基于 ConstraintGroup 计算种子能量。
+  // 公式：Energy = 目标函数贡献 - 非目标函数惩罚
+  // 权重：主函数(1000) | 路径函数(50~1000 靠近目标递增) | 非目标(1.0~GetWeight 用于惩罚)
+  // 经过目标区域函数 → 增加能量；经过非目标函数 → 减少能量。
+  void CalculateSeedWeight(ConstraintGroup &selectedGroup,
+                           std::vector<TracePC::CoverageInfo> &CoverageInfos,
+                           std::string FuzzerName) {
+    std::unordered_map<std::uintptr_t, double> TargetWeightMap;   // 目标函数(主+路径)，覆盖则加分
+    std::unordered_map<std::uintptr_t, double> NonTargetWeightMap; // 非目标函数，覆盖则扣分
+    if (CoverageInfos.empty())
+      return;
+    size_t GlobalAverageHits = TPC.CalculateFuncsAverageHits(CoverageInfos, FuzzerName);
+    auto &FuncsInfo = CoverageInfos[0].FuncsInfo;
+    const double kWeightBonusRatio = 0.15;
+    const double kNonTargetWeightMin = 1.0; // 非目标函数最小权重（用于惩罚）
+    const double kPathWeightMin = 50;
+    const double kPathWeightMax = 1000;
+
+    std::unordered_map<std::string, double> PathFuncBaseWeight;
+    for (const auto &Path : selectedGroup.Paths) {
+      if (Path.empty())
+        continue;
+      for (size_t idx = 0; idx < Path.size(); idx++) {
+        double w = kPathWeightMin + (kPathWeightMax - kPathWeightMin) * static_cast<double>(idx + 1) / Path.size();
+        auto it = PathFuncBaseWeight.find(Path[idx]);
+        if (it == PathFuncBaseWeight.end() || w > it->second)
+          PathFuncBaseWeight[Path[idx]] = w;
+      }
+    }
+
+    for (const auto &Func : FuncsInfo) {
+      auto FuncName = DescribePC_Mangled(Func.Id);
+      double baseWeight = 0;
+      if (FuncName == selectedGroup.Function) {
+        baseWeight = 1000;
+      } else {
+        auto it = PathFuncBaseWeight.find(FuncName);
+        if (it != PathFuncBaseWeight.end())
+          baseWeight = it->second;
+      }
+
+      double funcBonus = Func.GetWeight(GlobalAverageHits);
+      if (funcBonus <= 0)
+        funcBonus = 0;
+
+      if (baseWeight > 0) {
+        double w = baseWeight + kWeightBonusRatio * funcBonus;
+        TargetWeightMap[Func.Id] = w;
+      } else {
+        NonTargetWeightMap[Func.Id] = std::max(kNonTargetWeightMin, funcBonus);
+      }
+    }
+
+    double maxEnergy = 0;
+    double minEnergy = 1e9;
+    size_t liveCount = 0;
+    for (auto SI : Inputs) {
+      if (!SI->Live)
+        continue;
+      liveCount++;
+      double targetSum = 0;    // 经过目标函数 → 增加能量
+      double nonTargetSum = 0; // 经过非目标函数 → 减少能量
+      for (const auto &FuncId : SI->SeedFuncs) {
+        std::string FileStr = DescribePC("%s", FuncId);
+        if (!IsInterestingCoverageFile(FileStr))
+          continue;
+        auto itT = TargetWeightMap.find(FuncId);
+        if (itT != TargetWeightMap.end()) {
+          targetSum += itT->second;
+        } else {
+          auto itN = NonTargetWeightMap.find(FuncId);
+          double w = (itN != NonTargetWeightMap.end()) ? itN->second : kNonTargetWeightMin;
+          nonTargetSum += w;
+        }
+      }
+      SI->Energy = std::max(0.0, targetSum - nonTargetSum);
+      if (SI->Energy > maxEnergy)
+        maxEnergy = SI->Energy;
+      if (SI->Energy < minEnergy)
+        minEnergy = SI->Energy;
+    }
+
+    std::cerr << "\t[Constraint] main=" << selectedGroup.Function << " targetFuncs=" << TargetWeightMap.size()
+              << " nonTargetFuncs=" << NonTargetWeightMap.size() << " liveSeeds=" << liveCount;
+    if (liveCount > 0)
+      std::cerr << " EnergyRange=[" << minEnergy << "," << maxEnergy << "]";
+    std::cerr << std::endl;
+  }
   // 根据种子选择次数和种子权重计算种子得分
   void CalculateSeedScore(double Explore) {
     // std::cout << "Calculating Seed Scores with Explore factor: " << Explore << std::endl;
@@ -461,64 +549,61 @@ public:
     std::vector<SeedInfo *> SortedSeeds;
     std::vector<SeedInfo *> JobSeeds;
 
-    std::vector<TracePC::FuncInfo> ValueFuncsList = TPC.GetValueFuncsList(CoverageInfos, FuzzerName, selectedGroup);
-
-    // std::cout << "Value Functions List Size: " << ValueFuncsList.size() << std::endl;
-    CalculateSeedWeight(ValueFuncsList, CoverageInfos, FuzzerName);
-    // std::cout << "Calculated Seed Scores with Explore factor: " << Explore << std::endl;
+    CalculateSeedWeight(selectedGroup, CoverageInfos, FuzzerName);
+    CalculateSeedScore(Explore); // UCB1：平衡 Energy 与 Selections，多次选取的种子得分降低
     for (auto SI : Inputs) {
       if (SI->Live)
         SortedSeeds.push_back(SI);
     }
-    // std::cout << "Number of Live Seeds: " << SortedSeeds.size() << std::endl;
     std::sort(SortedSeeds.begin(), SortedSeeds.end(), [](SeedInfo *a, SeedInfo *b) {
-      return a->Energy < b->Energy;
+      return a->UCB1Score > b->UCB1Score;
     });
 
-    size_t loop_count = 0;
-    while (JobSeeds.size() < SeedsNum) {
-      loop_count++;
-      if (loop_count > 3 * SortedSeeds.size())
-        break;
-      if (SortedSeeds.empty())
-        break;
-      size_t Index = Rand.SkewTowardsLast(SortedSeeds.size());
-      if (SortedSeeds[Index]->Locked)
+    std::vector<SeedInfo *> Candidates;
+    for (size_t i = 0; i < SortedSeeds.size() && Candidates.size() < 2 * SeedsNum; i++) {
+      if (SortedSeeds[i]->Locked)
         continue;
-      SortedSeeds[Index]->Selections++;
-      SortedSeeds[Index]->Locked = true;
-      JobSeeds.push_back(SortedSeeds[Index]);
-      // std::cout << "Selected Seed: " << SortedSeeds[Index]->File << " with UCB1 Score: " << SortedSeeds[Index]->UCB1Score << std::endl;
+      Candidates.push_back(SortedSeeds[i]);
     }
-    if (JobSeeds.size() <= 1) {
-      std::cerr << "No enough seeds selected, using random live seeds." << std::endl;
-      for (size_t i = 0; i < SeedsNum; i++) {
+
+    std::sort(Candidates.begin(), Candidates.end(), [](SeedInfo *a, SeedInfo *b) {
+      return a->TimeOfUnit.count() < b->TimeOfUnit.count();
+    });
+    for (size_t i = 0; i < Candidates.size() && JobSeeds.size() < SeedsNum; i++) {
+      Candidates[i]->Selections++;
+      Candidates[i]->Locked = true;
+      JobSeeds.push_back(Candidates[i]);
+    }
+    if (JobSeeds.size() < SeedsNum && !SortedSeeds.empty()) {
+      std::cerr << "No enough constraint seeds, filling with SkewTowardsLast." << std::endl;
+      size_t needed = SeedsNum - JobSeeds.size();
+      size_t filled = 0;
+      for (size_t retries = 0; filled < needed && retries < 3 * SortedSeeds.size(); retries++) {
         size_t Index = Rand.SkewTowardsLast(SortedSeeds.size());
-        SortedSeeds[Index]->Selections++;
-        SortedSeeds[Index]->Locked = true;
-        JobSeeds.push_back(SortedSeeds[Index]);
+        SeedInfo *seed = SortedSeeds[Index];
+        if (seed->Locked)
+          continue;
+        seed->Selections++;
+        seed->Locked = true;
+        JobSeeds.push_back(seed);
+        filled++;
       }
     }
-    // std::cout << "Total Job Seeds Selected: " << JobSeeds.size() << std::endl;
     return JobSeeds;
   }
 
   std::vector<SeedInfo *> GetJobSeedsUCB1(size_t SeedsNum, const std::string &FuzzerName, Random &Rand,
                                           std::vector<TracePC::CoverageInfo> &CoverageInfos, double Explore) {
-    // std::cout << "Getting Job Seeds for Fuzzer: " << FuzzerName << " with Seed Number: " << SeedsNum << std::endl;
     std::vector<SeedInfo *> SortedSeeds;
     std::vector<SeedInfo *> JobSeeds;
 
     std::vector<TracePC::FuncInfo> ValueFuncsList = TPC.GetValueFuncsList(CoverageInfos, FuzzerName);
-    // std::cout << "Value Functions List Size: " << ValueFuncsList.size() << std::endl;
     CalculateSeedWeight(ValueFuncsList, CoverageInfos, FuzzerName);
     CalculateSeedScore(Explore);
-    // std::cout << "Calculated Seed Scores with Explore factor: " << Explore << std::endl;
     for (auto SI : Inputs) {
       if (SI->Live)
         SortedSeeds.push_back(SI);
     }
-    // std::cout << "Number of Live Seeds: " << SortedSeeds.size() << std::endl;
     std::sort(SortedSeeds.begin(), SortedSeeds.end(), [](SeedInfo *a, SeedInfo *b) {
       return a->UCB1Score < b->UCB1Score;
     });
@@ -535,40 +620,39 @@ public:
       SortedSeeds[Index]->Selections++;
       SortedSeeds[Index]->Locked = true;
       JobSeeds.push_back(SortedSeeds[Index]);
-      // std::cout << "Selected Seed: " << SortedSeeds[Index]->File << " with UCB1 Score: " << SortedSeeds[Index]->UCB1Score << std::endl;
     }
-    if (JobSeeds.size() <= 1) {
-      std::cerr << "No enough seeds selected, using random live seeds." << std::endl;
-      for (size_t i = 0; i < SeedsNum; i++) {
+    if (JobSeeds.size() < SeedsNum && !SortedSeeds.empty()) {
+      std::cerr << "No enough UCB1 seeds selected, filling with SkewTowardsLast." << std::endl;
+      size_t needed = SeedsNum - JobSeeds.size();
+      for (size_t i = 0; i < needed; i++) {
         size_t Index = Rand.SkewTowardsLast(SortedSeeds.size());
-        SortedSeeds[Index]->Selections++;
-        SortedSeeds[Index]->Locked = true;
-        JobSeeds.push_back(SortedSeeds[Index]);
+        SeedInfo *seed = SortedSeeds[Index];
+        seed->Selections++;
+        seed->Locked = true;
+        JobSeeds.push_back(seed);
       }
     }
-    // std::cout << "Total Job Seeds Selected: " << JobSeeds.size() << std::endl;
     return JobSeeds;
   }
 
   std::vector<SeedInfo *> GetJobSeedsNew(size_t SeedsNum, const std::string &FuzzerName, Random &Rand,
                                          std::vector<TracePC::CoverageInfo> &CoverageInfos, double Explore) {
-    // std::cout << "Getting Job Seeds for Fuzzer: " << FuzzerName << " with Seed Number: " << SeedsNum << std::endl;
+    (void)FuzzerName;
+    (void)CoverageInfos;
+    (void)Explore;
     std::vector<SeedInfo *> SortedSeeds;
     std::vector<SeedInfo *> JobSeeds;
 
-    std::vector<TracePC::FuncInfo> ValueFuncsList = TPC.GetValueFuncsList(CoverageInfos, FuzzerName);
-    // std::cout << "Value Functions List Size: " << ValueFuncsList.size() << std::endl;
-    CalculateSeedWeight(ValueFuncsList, CoverageInfos, FuzzerName);
-    CalculateSeedScore(Explore);
-    // std::cout << "Calculated Seed Scores with Explore factor: " << Explore << std::endl;
-    for (auto SI : Inputs) {
-      if (SI->Live)
-        SortedSeeds.push_back(SI);
+    std::vector<std::pair<size_t, SeedInfo *>> IndexedSeeds;
+    for (size_t i = 0; i < Inputs.size(); i++) {
+      if (Inputs[i]->Live)
+        IndexedSeeds.push_back({i, Inputs[i]});
     }
-    // std::cout << "Number of Live Seeds: " << SortedSeeds.size() << std::endl;
-    std::sort(SortedSeeds.begin(), SortedSeeds.end(), [](SeedInfo *a, SeedInfo *b) {
-      return a->UCB1Score < b->UCB1Score;
-    });
+    std::sort(IndexedSeeds.begin(), IndexedSeeds.end(),
+              [](const auto &a, const auto &b) { return a.first < b.first; });
+    for (const auto &p : IndexedSeeds)
+      SortedSeeds.push_back(p.second);
+
     size_t loop_count = 0;
     while (JobSeeds.size() < SeedsNum) {
       loop_count++;
@@ -576,24 +660,24 @@ public:
         break;
       if (SortedSeeds.empty())
         break;
-      size_t Index = Rand.SkewTowardsLast(SortedSeeds.size());
+      size_t Index = Rand.SkewTowardsLast(SortedSeeds.size()); // 偏向后半部分=更新
       if (SortedSeeds[Index]->Locked)
         continue;
       SortedSeeds[Index]->Selections++;
       SortedSeeds[Index]->Locked = true;
       JobSeeds.push_back(SortedSeeds[Index]);
-      // std::cout << "Selected Seed: " << SortedSeeds[Index]->File << " with UCB1 Score: " << SortedSeeds[Index]->UCB1Score << std::endl;
     }
-    if (JobSeeds.size() <= 1) {
-      std::cerr << "No enough seeds selected, using random live seeds." << std::endl;
-      for (size_t i = 0; i < SeedsNum; i++) {
+    if (JobSeeds.size() < SeedsNum && !SortedSeeds.empty()) {
+      std::cerr << "No enough newest seeds selected, filling with SkewTowardsLast." << std::endl;
+      size_t needed = SeedsNum - JobSeeds.size();
+      for (size_t i = 0; i < needed; i++) {
         size_t Index = Rand.SkewTowardsLast(SortedSeeds.size());
-        SortedSeeds[Index]->Selections++;
-        SortedSeeds[Index]->Locked = true;
-        JobSeeds.push_back(SortedSeeds[Index]);
+        SeedInfo *seed = SortedSeeds[Index];
+        seed->Selections++;
+        seed->Locked = true;
+        JobSeeds.push_back(seed);
       }
     }
-    // std::cout << "Total Job Seeds Selected: " << JobSeeds.size() << std::endl;
     return JobSeeds;
   }
 

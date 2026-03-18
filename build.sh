@@ -14,6 +14,6 @@ mkdir -p build
 rm -rf build/*
 cd build
 
-cmake .. --project-file CMakeLists-self.txt 
+cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ..
 make -j4
 

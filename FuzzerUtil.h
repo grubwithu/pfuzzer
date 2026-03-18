@@ -39,6 +39,8 @@ std::string Base64(const Unit &U);
 
 void PrintPC(const char *SymbolizedFMT, const char *FallbackFMT, uintptr_t PC);
 
+std::string DescribePC_Mangled(uintptr_t PC);
+
 std::string DescribePC(const char *SymbolizedFMT, uintptr_t PC);
 
 void PrintStackTrace();

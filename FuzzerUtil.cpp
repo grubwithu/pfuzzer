@@ -11,6 +11,7 @@
 #include "FuzzerUtil.h"
 #include "FuzzerIO.h"
 #include "FuzzerInternal.h"
+#include <dlfcn.h>
 #include <cassert>
 #include <chrono>
 #include <cstring>
@@ -196,6 +197,17 @@ std::string Base64(const Unit &U) {
 }
 
 static std::mutex SymbolizeMutex;
+
+std::string DescribePC_Mangled(uintptr_t PC) {
+  Dl_info info;
+  if (dladdr(reinterpret_cast<void*>(PC), &info)) {
+    if (info.dli_sname) {
+      return std::string(info.dli_sname);
+    }
+  }
+  return "<unknown_symbol>";
+
+}
 
 std::string DescribePC(const char *SymbolizedFMT, uintptr_t PC) {
   std::unique_lock<std::mutex> l(SymbolizeMutex, std::try_to_lock);
