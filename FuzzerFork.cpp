@@ -330,6 +330,9 @@ struct GlobalEnv {
       MkDir(D);
     }
     CopyMultipleFiles(JobSeeds, Job->InputDir);
+
+    ReportCorpus(Job->FuzzerName, Job->FuzzerName, "begin", {Job->InputDir});
+
     AllArgsInfo->GetFuzzerCmd(FuzzerName, *Job, Args, CorpusDirs, TempDir);
     // Print Job INFO :JobId Job->FuzzerName Jobseeds num , jobbudget JobInput JobcORPUS
     Printf("\tCreateNewJob Done: JobId: %zd, FuzzerName: %s, JobSeedsNum: %zd, JobBudget: %s, JobInput: %s, JobCorpus: %s\n",
@@ -360,7 +363,7 @@ struct GlobalEnv {
     }
     std::string LocalCorpusDir = GetLocalCorpusDir(Job->CorpusDir, Job->FuzzerName);
 
-    ReportCorpus(Job->FuzzerName, Job->FuzzerName, {LocalCorpusDir});
+    ReportCorpus(Job->FuzzerName, Job->FuzzerName, "end", {LocalCorpusDir});
 
     std::vector<SizedFile> LocalCorpusSeeds;
     GetSizedFilesFromDir(LocalCorpusDir, &LocalCorpusSeeds);

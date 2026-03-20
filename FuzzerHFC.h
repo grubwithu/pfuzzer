@@ -3,7 +3,7 @@
 #define FUZZER_HFC_H
 
 #include "httplib.h"
-#include "nlohmann/json.hpp"
+// #include "nlohmann/json.hpp"
 #include <memory>
 #include <vector>
 #include <unordered_map>
@@ -20,8 +20,7 @@ struct ConstraintGroup {
 
 }; // From HFC
 
-
-using json = nlohmann::json;
+// using json = nlohmann::json;
 
 httplib::Client *GetHTTPClient();
 
@@ -32,7 +31,7 @@ struct PeekResultResponce {
 };
 
 std::unique_ptr<PeekResultResponce> PeekResult();
-void ReportCorpus(std::string FuzzerName, std::string Identity, std::vector<std::string> Corpus);
+void ReportCorpus(std::string FuzzerName, std::string Identity, std::string period, std::vector<std::string> Corpus);
 void Log(std::string Log);
 
 } // namespace fuzzer

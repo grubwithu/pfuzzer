@@ -1,6 +1,9 @@
 #include "FuzzerHFC.h"
+#include "nlohmann/json.hpp" 
 
 namespace fuzzer {
+
+using json = nlohmann::json;
 
 httplib::Client *GetHTTPClient() {
   static httplib::Client *Client = nullptr;
@@ -59,11 +62,12 @@ std::unique_ptr<PeekResultResponce> PeekResult() {
   return response;
 }
 
-void ReportCorpus(std::string FuzzerName, std::string Identity, std::vector<std::string> Corpus) {
+void ReportCorpus(std::string FuzzerName, std::string Identity, std::string period, std::vector<std::string> Corpus) {
   auto &Client = *GetHTTPClient();
   json Body = {
       {"fuzzer", FuzzerName},
       {"identity", Identity},
+      {"period", period},
       {"corpus", Corpus},
   };
   auto Res = Client.Post("/reportCorpus", Body.dump(), "application/json");
