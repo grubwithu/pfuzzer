@@ -91,4 +91,16 @@ void Log(std::string Log) {
   }
 }
 
+bool Ready() {
+  auto &Client = *GetHTTPClient();
+  auto Res = Client.Get("/ready");
+  if (Res) {
+    auto JsonRes = json::parse(Res->body);
+    if (JsonRes.contains("success") && JsonRes["success"].is_boolean()) {
+      return JsonRes["success"];  
+    }
+  }
+  return false;
+}
+
 } // namespace fuzzer

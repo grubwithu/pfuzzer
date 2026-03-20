@@ -237,6 +237,12 @@ struct GlobalEnv {
   }
 
   FuzzJob *CreateNewJob(size_t JobId, GlobalCorpusInfo *GlobalCorpus, std::vector<TracePC::CoverageInfo> *CoverageInfos, ArgsInfo *AllArgsInfo) {
+
+    while (!Ready()) {
+      Log("HFC is not ready, wait for 1 second");
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    } 
+
     // COV or Crash
     // Select a fuzzer
     // Select seeds
