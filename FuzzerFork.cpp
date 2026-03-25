@@ -25,6 +25,7 @@
 #include <mutex>
 #include <queue>
 #include <sstream>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -82,136 +83,6 @@ struct GlobalEnv {
         .count();
   }
 
-  std::pair<size_t, std::string> SelectFuzzer(
-      std::vector<ConstraintGroup> ConstraintGroups,
-      std::unordered_map</*Fuzzer*/ std::string, std::unordered_map</*Constraint*/ std::string, double>> FuzzerScores,
-      std::unordered_map</*Fuzzer*/ std::string, int> FuzzerCovInc) {
-
-    std::string FuzzerName = "";
-    size_t index = 0;
-
-    // 基于ConstraintGroups和FuzzerScores选择Fuzzer
-    if (!ConstraintGroups.empty() && !FuzzerScores.empty()) {
-      // 第一步：选择constraint_group，importance高的有更高概率，但低的也有机会
-      std::vector<double> groupProbabilities;
-      double totalImportance = 0.0;
-
-      // 计算总importance并添加基础概率确保低importance的group也有机会
-      for (const auto &group : ConstraintGroups) {
-        totalImportance += group.Importance;
-      }
-
-      // 为每个group计算选择概率，使用softmax函数确保概率分布
-      double temperature = 0.5; // 温度参数，控制随机性，值越大随机性越高
-      double sumExp = 0.0;
-      std::vector<double> expValues;
-
-      for (const auto &group : ConstraintGroups) {
-        double expValue = exp(group.Importance / temperature);
-        expValues.push_back(expValue);
-        sumExp += expValue;
-      }
-
-      for (const auto &expValue : expValues) {
-        groupProbabilities.push_back(expValue / sumExp);
-      }
-
-      // 根据概率随机选择一个group
-      double randomValue = Rand->Rand<int>() % 1000 / 1000.0;
-      double cumulativeProbability = 0.0;
-      ConstraintGroup *selectedGroup;
-
-      for (size_t i = 0; i < ConstraintGroups.size(); i++) {
-        cumulativeProbability += groupProbabilities[i];
-        if (randomValue <= cumulativeProbability) {
-          selectedGroup = &ConstraintGroups[i];
-          index = i;
-          break;
-        }
-        // 如果没有选中，默认选择最后一个
-        if (i == ConstraintGroups.size() - 1) {
-          selectedGroup = &ConstraintGroups[i];
-          index = i;
-        }
-      }
-
-      int maxCovInc = -1;
-      for (auto &fuzzerEntry : FuzzerCovInc) {
-        int absInc = std::abs(fuzzerEntry.second);
-        if (absInc > maxCovInc) {
-          maxCovInc = absInc;
-          FuzzerName = fuzzerEntry.first;
-        }
-      }
-
-      // 第二步：基于选中的group选择最适合的fuzzer
-      // 计算每个fuzzer与该group的匹配度（点乘）
-      std::vector<std::pair<std::string, double>> fuzzerScores;
-
-      for (const auto &fuzzerEntry : FuzzerScores) {
-        const std::string &fuzzerName = fuzzerEntry.first;
-        const auto &fuzzerConstraints = fuzzerEntry.second;
-
-        // 计算点乘：group.constraint_score与fuzzer的约束分数
-        double dotProduct = 0.0;
-        for (const auto &constraint : fuzzerConstraints) {
-          for (const auto &constraint : selectedGroup->ConstraintScores) {
-            if (constraint.first == constraint.first) {
-              dotProduct += constraint.second * fuzzerConstraints.at(constraint.first);
-            }
-          }
-        }
-
-        dotProduct += static_cast<double>(FuzzerCovInc[fuzzerName]) / (maxCovInc + 1.0) * 3.0;
-        fuzzerScores.push_back({fuzzerName, dotProduct});
-      }
-
-      // 按分数排序
-      std::sort(fuzzerScores.begin(), fuzzerScores.end(),
-                [](const auto &a, const auto &b) { return a.second > b.second; });
-
-      // 第三步：使用加权随机选择fuzzer，分数高的有更高概率，但低的也有机会
-      if (!fuzzerScores.empty()) {
-        // 使用softmax函数计算选择概率
-        temperature = 0.3; // 较低的温度，更倾向于选择高分fuzzer
-        sumExp = 0.0;
-        std::vector<double> fuzzerExpValues;
-
-        for (const auto &fuzzer : fuzzerScores) {
-          double expValue = exp(fuzzer.second / temperature);
-          fuzzerExpValues.push_back(expValue);
-          sumExp += expValue;
-        }
-
-        std::vector<double> fuzzerProbabilities;
-        for (const auto &expValue : fuzzerExpValues) {
-          fuzzerProbabilities.push_back(expValue / sumExp);
-        }
-
-        // 根据概率随机选择一个fuzzer
-        randomValue = Rand->Rand<int>() % 1000 / 1000.0;
-        cumulativeProbability = 0.0;
-
-        for (size_t i = 0; i < fuzzerScores.size(); i++) {
-          cumulativeProbability += fuzzerProbabilities[i];
-          if (randomValue <= cumulativeProbability) {
-            FuzzerName = fuzzerScores[i].first;
-            break;
-          }
-          // 如果没有选中，默认选择第一个（分数最高的）
-          if (i == fuzzerScores.size() - 1) {
-            FuzzerName = fuzzerScores[0].first;
-          }
-        }
-
-        // Printf("\tSelected Fuzzer: %s for Constraint Group: %s (Importance: %f)\n",
-        //        FuzzerName.c_str(), selectedGroup->GroupId.c_str(), selectedGroup->Importance);
-      }
-    }
-
-    return make_pair(index, FuzzerName);
-  }
-
   size_t GetCurStrategy(size_t Strategy, size_t PassedMinutes) {
     if (BitCount(Strategy) == 1) {
       return Strategy;
@@ -239,9 +110,9 @@ struct GlobalEnv {
   FuzzJob *CreateNewJob(size_t JobId, GlobalCorpusInfo *GlobalCorpus, std::vector<TracePC::CoverageInfo> *CoverageInfos, ArgsInfo *AllArgsInfo) {
 
     while (!Ready()) {
-      Log("HFC is not ready, wait for 1 second");
+      Printf("HFC is not ready, wait for 1 second");
       std::this_thread::sleep_for(std::chrono::seconds(1));
-    } 
+    }
 
     // COV or Crash
     // Select a fuzzer
@@ -261,22 +132,69 @@ struct GlobalEnv {
     if (CurSeedStrategy & SEED_STRATEGY_CORPUS || CurFuzzerStrategy & FUZZER_STRATEGY_CORPUS) {
       // Get recommended function name from hfc.
       auto PeekResultResponse = PeekResult();
-      auto &ConstraintGroups = PeekResultResponse->ConstraintGroups;
+      selectedGroup = PeekResultResponse->ConstraintGroup;
       auto &FuzzerScores = PeekResultResponse->FuzzerScores;
-      auto &FuzzerCovInc = PeekResultResponse->FuzzerCovInc;
 
-      if (ConstraintGroups.empty()) {
-        CurSeedStrategy = SEED_STRATEGY_UCB1;
-        CurFuzzerStrategy = FUZZER_STRATEGY_UCB1;
-      } else {
-        if (FuzzerScores.empty()) {
-          CurFuzzerStrategy = FUZZER_STRATEGY_UCB1;
+      if (CurFuzzerStrategy & FUZZER_STRATEGY_CORPUS) {
+        // Select A Fuzzer
+        if (!FuzzerScores.empty()) {
+          // 计算每个fuzzer与selectedGroup的内积
+          std::vector<std::pair<std::string, double>> fuzzerScores;
+          for (const auto &fuzzerEntry : FuzzerScores) {
+            const std::string &fuzzerName = fuzzerEntry.first;
+            const auto &fuzzerConstraints = fuzzerEntry.second;
+            
+            // 计算内积
+            double dotProduct = 0.0;
+            for (const auto &groupConstraint : selectedGroup.ConstraintScore) {
+              const auto &constraintName = groupConstraint.first;
+              const auto &groupScore = groupConstraint.second;
+              
+              if (fuzzerConstraints.find(constraintName) != fuzzerConstraints.end()) {
+                const auto &fuzzerScore = fuzzerConstraints.at(constraintName);
+                dotProduct += groupScore * fuzzerScore;
+              }
+            }
+            
+            fuzzerScores.push_back({fuzzerName, dotProduct});
+          }
+          
+          // 计算选择概率（基于内积值）
+          double sumScores = 0.0;
+          for (const auto &entry : fuzzerScores) {
+            sumScores += entry.second;
+          }
+          
+          if (sumScores > 0) {
+            // 生成随机数
+            double randomValue = Rand->Rand<int>() % 1000 / 1000.0;
+            double cumulativeProbability = 0.0;
+            
+            // 根据概率选择fuzzer
+            for (const auto &entry : fuzzerScores) {
+              const std::string &fuzzerName = entry.first;
+              double score = entry.second;
+              double probability = score / sumScores;
+              
+              cumulativeProbability += probability;
+              if (randomValue <= cumulativeProbability) {
+                FuzzerName = fuzzerName;
+                break;
+              }
+            }
+            
+            // 如果没有选中（理论上不会发生），默认选择第一个
+            if (FuzzerName.empty() && !fuzzerScores.empty()) {
+              FuzzerName = fuzzerScores[0].first;
+            }
+          } else if (!fuzzerScores.empty()) {
+            // 如果所有内积都是0，随机选择一个
+            size_t randomIndex = Rand->Rand<int>() % fuzzerScores.size();
+            FuzzerName = fuzzerScores[randomIndex].first;
+          }
         }
-        
-        auto ResPair = SelectFuzzer(ConstraintGroups, FuzzerScores, FuzzerCovInc);
-        selectedGroup = ConstraintGroups[ResPair.first];
-        FuzzerName = ResPair.second;
       }
+      
     }
 
     // 加锁 Question: Why do we need to lock here?
@@ -302,7 +220,7 @@ struct GlobalEnv {
         it->Selections++;
     }
 
-    std::string JobBudget = std::to_string(std::min((size_t)3600, JobId * 20)); // TODO GetJobBudget FUNC()
+    auto JobBudget = std::min((size_t)3600, JobId * 20); // TODO GetJobBudget FUNC()
     Job->JobBudget = JobBudget;
     size_t SeedsNum = std::min(GlobalCorpus->GetLiveInputsSize(), 10 * (size_t)sqrt(GlobalCorpus->GetLiveInputsSize() + 2)); // TODO GetSeedsNum FUNC()
     // 智能锁
@@ -337,12 +255,12 @@ struct GlobalEnv {
     }
     CopyMultipleFiles(JobSeeds, Job->InputDir);
 
-    ReportCorpus(Job->FuzzerName, Job->FuzzerName, "begin", {Job->InputDir});
+    ReportCorpus(Job->FuzzerName, JobId, JobBudget, "begin", {Job->InputDir}); // TODO: Budget JobID
 
-    AllArgsInfo->GetFuzzerCmd(FuzzerName, *Job, Args, CorpusDirs, TempDir);
+    AllArgsInfo->GetFuzzerCmd(FuzzerName, *Job, Args, CorpusDirs, TempDir); // Dict
     // Print Job INFO :JobId Job->FuzzerName Jobseeds num , jobbudget JobInput JobcORPUS
     Printf("\tCreateNewJob Done: JobId: %zd, FuzzerName: %s, JobSeedsNum: %zd, JobBudget: %s, JobInput: %s, JobCorpus: %s\n",
-           JobId, Job->FuzzerName.c_str(), JobSeeds.size(), Job->JobBudget.c_str(), Job->InputDir.c_str(), Job->CorpusDir.c_str());
+           JobId, Job->FuzzerName.c_str(), JobSeeds.size(), Job->JobBudgetStr().c_str(), Job->InputDir.c_str(), Job->CorpusDir.c_str());
     // 将CreateNewJob信息写入LogPath
     std::ofstream LogFile(LogPath, std::ios::app);
     LogFile << "\tCreateNewJob Done: JobId: " << JobId << ", FuzzerName: " << Job->FuzzerName << ", JobSeedsNum: " << JobSeeds.size() << ", JobBudget: " << Job->JobBudget << ", JobInput: " << Job->InputDir << ", JobCorpus: " << Job->CorpusDir << std::endl;
@@ -369,7 +287,7 @@ struct GlobalEnv {
     }
     std::string LocalCorpusDir = GetLocalCorpusDir(Job->CorpusDir, Job->FuzzerName);
 
-    ReportCorpus(Job->FuzzerName, Job->FuzzerName, "end", {LocalCorpusDir});
+    ReportCorpus(Job->FuzzerName, Job->JobId, Job->JobBudget, "end", {LocalCorpusDir});
 
     std::vector<SizedFile> LocalCorpusSeeds;
     GetSizedFilesFromDir(LocalCorpusDir, &LocalCorpusSeeds);
@@ -473,7 +391,7 @@ struct GlobalEnv {
           FuzzerIt->Score += JobFeedback;
         }
         FuzzerIt->CoveredBranches += Job->NewCov.size();
-        FuzzerIt->UsedBudget += std::stod(Job->JobBudget);
+        FuzzerIt->UsedBudget += Job->JobBudget;
       }
     }
     // 打印输出：NumRuns Cov.size() Features.size() Job->JobId Seeds live

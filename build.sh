@@ -10,10 +10,13 @@
 # ar r libFuzzer.a Fuzzer*.o
 # rm -f Fuzzer*.o
 
+export CC=clang
+export CXX=clang++
+
 mkdir -p build
 rm -rf build/*
 cd build
 
 cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ..
-make -j4
+make -j12
 

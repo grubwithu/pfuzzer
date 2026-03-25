@@ -129,7 +129,7 @@ struct FuzzJob {
   std::string FuzzerName;
   std::vector<SeedInfo *> JobSeeds;
   std::string BinaryName;
-  std::string JobBudget;
+  size_t JobBudget;
   std::string CorpusDir;
   std::string FeaturesDir;
   std::string LogPath;
@@ -144,6 +144,10 @@ struct FuzzJob {
 
   // Fuzzing Outputs.
   int ExitCode;
+
+  inline std::string JobBudgetStr() {
+    return std::to_string(JobBudget);
+  }
 
   ~FuzzJob() {
     RemoveFile(CFPath);
@@ -226,7 +230,7 @@ public:
       Cmd.addFlag("verbosity", "2");
       // Cmd.addFlag("verbosity", "0");
       Cmd.addFlag("print_funcs", "0"); // no need to spend time symbolizing.
-      Cmd.addFlag("max_total_time", FuzzJob.JobBudget);
+      Cmd.addFlag("max_total_time", FuzzJob.JobBudgetStr());
       Cmd.addFlag("stop_file", FuzzJob.StopFile);
       if (FuzzerName == "entropic")
         Cmd.addFlag("entropic", "1");
@@ -266,7 +270,7 @@ public:
         printf("fuzzer name: %s\n", FuzzerName.c_str());
         // if ((FuzzerName != "aflfast") && (FuzzerName != "aflgo")) {
         InitArgs.insert(InitArgs.begin() + 5, "-V");
-        InitArgs.insert(InitArgs.begin() + 6, FuzzJob.JobBudget);
+        InitArgs.insert(InitArgs.begin() + 6, FuzzJob.JobBudgetStr());
         // }
 
         // 最后一个参数，输入binary路径
@@ -280,7 +284,7 @@ public:
         InitArgs.insert(InitArgs.begin() + 3, "-W");
         InitArgs.insert(InitArgs.begin() + 4, FuzzJob.CorpusDir);
         InitArgs.insert(InitArgs.begin() + 5, "--run_time");
-        InitArgs.insert(InitArgs.begin() + 6, FuzzJob.JobBudget);
+        InitArgs.insert(InitArgs.begin() + 6, FuzzJob.JobBudgetStr());
         // 最后一个参数，输入binary路径
         InitArgs.push_back(TargetPath);
       }
@@ -290,7 +294,7 @@ public:
         InitArgs.insert(InitArgs.begin() + 3, "-o");
         InitArgs.insert(InitArgs.begin() + 4, FuzzJob.CorpusDir);
         InitArgs.insert(InitArgs.begin() + 5, "-dur");
-        InitArgs.insert(InitArgs.begin() + 6, FuzzJob.JobBudget);
+        InitArgs.insert(InitArgs.begin() + 6, FuzzJob.JobBudgetStr());
         InitArgs.push_back(TargetPath);
       }
       Command Cmd(InitArgs);
@@ -452,11 +456,12 @@ public:
     const double kPathWeightMax = 1000;
 
     std::unordered_map<std::string, double> PathFuncBaseWeight;
-    for (const auto &Path : selectedGroup.Paths) {
-      if (Path.empty())
-        continue;
+    auto Path = selectedGroup.Path;
+    if (!Path.empty()) {
       for (size_t idx = 0; idx < Path.size(); idx++) {
-        double w = kPathWeightMin + (kPathWeightMax - kPathWeightMin) * static_cast<double>(idx + 1) / Path.size();
+        double w = kPathWeightMin + (kPathWeightMax - kPathWeightMin) *
+                                        static_cast<double>(idx + 1) /
+                                        Path.size();
         auto it = PathFuncBaseWeight.find(Path[idx]);
         if (it == PathFuncBaseWeight.end() || w > it->second)
           PathFuncBaseWeight[Path[idx]] = w;
@@ -466,7 +471,7 @@ public:
     for (const auto &Func : FuncsInfo) {
       auto FuncName = DescribePC_Mangled(Func.Id);
       double baseWeight = 0;
-      if (FuncName == selectedGroup.Function) {
+      if (FuncName == selectedGroup.LeafFunction) {
         baseWeight = 1000;
       } else {
         auto it = PathFuncBaseWeight.find(FuncName);
@@ -515,7 +520,7 @@ public:
         minEnergy = SI->Energy;
     }
 
-    std::cerr << "\t[Constraint] main=" << selectedGroup.Function << " targetFuncs=" << TargetWeightMap.size()
+    std::cerr << "\t[Constraint] main=" << selectedGroup.LeafFunction << " targetFuncs=" << TargetWeightMap.size()
               << " nonTargetFuncs=" << NonTargetWeightMap.size() << " liveSeeds=" << liveCount;
     if (liveCount > 0)
       std::cerr << " EnergyRange=[" << minEnergy << "," << maxEnergy << "]";

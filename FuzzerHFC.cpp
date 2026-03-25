@@ -23,50 +23,56 @@ std::unique_ptr<PeekResultResponce> PeekResult() {
   auto &Client = *GetHTTPClient();
   auto Res = Client.Get("/peekResult");
   auto response = std::make_unique<PeekResultResponce>();
-  auto &ConstraintGroups = response->ConstraintGroups;
+  auto &ConstraintGroup = response->ConstraintGroup;
   auto &FuzzerScores = response->FuzzerScores;
   if (Res) {
     if (Res->status != 200) {
       std::cerr << "Recommend function failed: " << Res->body << std::endl;
     }
     auto JsonRes = json::parse(Res->body);
-    if (!JsonRes.contains("data") || !JsonRes["data"].contains("constraint_groups")) {
+    if (!JsonRes.contains("data") || !JsonRes["data"].contains("plugin_results")) {
       std::cerr << "peekResult reponse body is not valid, please check hfc is running correctly." << std::endl;
     }
-    if (JsonRes["data"]["constraint_groups"].is_array()) {
-      for (auto &Group : JsonRes["data"]["constraint_groups"]) {
-        ConstraintGroup CG;
-        CG.GroupId = Group["group_id"];
-        CG.Function = Group["function"];
-        CG.Importance = Group["importance"];
-        CG.Paths = Group["paths"];
-        // Print CGroup.Paths
-        std::cerr << "GroupId: " << CG.GroupId << " Function: " << CG.Function << " Importance: " << CG.Importance << std::endl;
-        for (auto &Path : CG.Paths) {
-          for (auto &P : Path) {
-            std::cerr << P << " ";
-          }
-          std::cerr << std::endl;
-        }
-        ConstraintGroups.push_back(CG);
+    auto &PluginResults = JsonRes["data"]["plugin_results"];
+    
+    // 处理 fuzzer_scores
+    if (PluginResults.contains("fuzzer") && PluginResults["fuzzer"].contains("fuzzer_scores")) {
+      FuzzerScores = PluginResults["fuzzer"]["fuzzer_scores"];
+    }
+    
+    // 处理 constraint_group
+    if (PluginResults.contains("seed") && PluginResults["seed"].contains("constraint_group")) {
+      auto &Group = PluginResults["seed"]["constraint_group"];
+      ConstraintGroup.GroupId = Group["group_id"];
+      ConstraintGroup.LeafFunction = Group["leaf_function"];
+      ConstraintGroup.FileName = Group["file_name"];
+      ConstraintGroup.Importance = Group["importance"];
+      // 处理 Path
+      ConstraintGroup.Path.clear();
+      for (auto &P : Group["path"]) {
+        ConstraintGroup.Path.push_back(P);
       }
-    }
-
-    if (JsonRes["data"]["fuzzer_scores"].is_object()) {
-      FuzzerScores = JsonRes["data"]["fuzzer_scores"];
-    }
-    if (JsonRes["data"]["fuzzer_cov_inc"].is_object()) {
-      response->FuzzerCovInc = JsonRes["data"]["fuzzer_cov_inc"];
+      // 处理 ConstraintScore
+      ConstraintGroup.ConstraintScore = Group["constraint_score"];
+      // 打印信息
+      std::cerr << "GroupId: " << ConstraintGroup.GroupId << " LeafFunction: " << ConstraintGroup.LeafFunction << " Importance: " << ConstraintGroup.Importance << std::endl;
+      std::cerr << "Path: ";
+      for (auto &P : ConstraintGroup.Path) {
+        std::cerr << P << " ";
+      }
+      std::cerr << std::endl;
     }
   }
   return response;
 }
 
-void ReportCorpus(std::string FuzzerName, std::string Identity, std::string period, std::vector<std::string> Corpus) {
+void ReportCorpus(std::string FuzzerName, size_t JobId, size_t JobBudget, std::string period, std::vector<std::string> Corpus) {
   auto &Client = *GetHTTPClient();
   json Body = {
       {"fuzzer", FuzzerName},
-      {"identity", Identity},
+      {"identity", FuzzerName},
+      {"job_id", JobId},
+      {"job_budget", JobBudget},
       {"period", period},
       {"corpus", Corpus},
   };

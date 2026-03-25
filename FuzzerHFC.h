@@ -11,13 +11,15 @@
 
 namespace fuzzer {
 
+typedef std::unordered_map<std::string, double> ConstraintScore;
+
 struct ConstraintGroup {
   std::string GroupId;
-  std::string Function;
+  std::string LeafFunction;
+  std::string FileName;
   double Importance;
-  std::vector<std::vector<std::string>> Paths;
-  std::unordered_map<std::string, double> ConstraintScores;
-
+  std::vector<std::string> Path;
+  ConstraintScore ConstraintScore;
 }; // From HFC
 
 // using json = nlohmann::json;
@@ -25,13 +27,12 @@ struct ConstraintGroup {
 httplib::Client *GetHTTPClient();
 
 struct PeekResultResponce {
-  std::vector<ConstraintGroup> ConstraintGroups;
-  std::unordered_map</*Fuzzer*/ std::string, std::unordered_map</*Constraint*/ std::string, double>> FuzzerScores;
-  std::unordered_map</*Fuzzer*/ std::string, int> FuzzerCovInc;
+  ConstraintGroup ConstraintGroup;
+  std::unordered_map<std::string, ConstraintScore> FuzzerScores;
 };
 
 std::unique_ptr<PeekResultResponce> PeekResult();
-void ReportCorpus(std::string FuzzerName, std::string Identity, std::string period, std::vector<std::string> Corpus);
+void ReportCorpus(std::string FuzzerName, size_t JobId, size_t JobBudget, std::string period, std::vector<std::string> Corpus);
 void Log(std::string Log);
 bool Ready();
 
