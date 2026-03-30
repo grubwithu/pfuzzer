@@ -18,6 +18,7 @@
 #include "FuzzerTracePC.h"
 #include "FuzzerUtil.h"
 #include <algorithm>
+#include <cassert>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -259,6 +260,7 @@ public:
       FuzzJob.Cmd = Cmd;
       // if (FuzzerName == "wingfuzz") Cmd.addFlag("wingfuzz", "1");
     } else {
+      assert(AllFuzzersArgs.find(FuzzerName) != AllFuzzersArgs.end() && "Fuzzer not found");
       InitArgs = AllFuzzersArgs[FuzzerName];
       std::string TargetPath = DirPlusFile(CurrentPath, DirPlusFile(FuzzJob.FuzzerName, Target_Program));
       // 在参数列表中的第一个参数，里面带有afl-fuzz字符串的命令，都需要添加下面参数" -i FuzzJob.InputDir -o FuzzJob.CorpusDir，位置在afl-fuzz后面"
