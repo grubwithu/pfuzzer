@@ -1,5 +1,6 @@
 #include "FuzzerHFC.h"
 #include "nlohmann/json.hpp" 
+#include "FuzzerIO.h"
 
 namespace fuzzer {
 
@@ -12,7 +13,8 @@ httplib::Client *GetHTTPClient() {
     if (HfcUrl) {
       Client = new httplib::Client(HfcUrl);
     } else {
-      std::cerr << "HFC_URL is not set, using localhost:8080" << std::endl;
+      // std::cerr << "HFC_URL is not set, using localhost:8080" << std::endl;
+      Printf("HFC_URL is not set, using localhost:8080\n");
       Client = new httplib::Client("localhost", 8080);
     }
   }
@@ -27,11 +29,13 @@ std::unique_ptr<PeekResultResponce> PeekResult() {
   auto &FuzzerScores = response->FuzzerScores;
   if (Res) {
     if (Res->status != 200) {
-      std::cerr << "Recommend function failed: " << Res->body << std::endl;
+      // std::cerr << "Recommend function failed: " << Res->body << std::endl;
+      Printf("Recommend function failed: %s\n", Res->body.c_str());
     }
     auto JsonRes = json::parse(Res->body);
     if (!JsonRes.contains("data") || !JsonRes["data"].contains("plugin_results")) {
-      std::cerr << "peekResult reponse body is not valid, please check hfc is running correctly." << std::endl;
+      // std::cerr << "peekResult reponse body is not valid, please check hfc is running correctly." << std::endl;
+      Printf("peekResult reponse body is not valid, please check hfc is running correctly.\n");
     }
     auto &PluginResults = JsonRes["data"]["plugin_results"];
     
@@ -55,12 +59,14 @@ std::unique_ptr<PeekResultResponce> PeekResult() {
       // 处理 ConstraintScore
       ConstraintGroup.ConstraintScore = Group["constraint_score"];
       // 打印信息
-      std::cerr << "GroupId: " << ConstraintGroup.GroupId << " LeafFunction: " << ConstraintGroup.LeafFunction << " Importance: " << ConstraintGroup.Importance << std::endl;
-      std::cerr << "Path: ";
+      // std::cerr << "GroupId: " << ConstraintGroup.GroupId << " LeafFunction: " << ConstraintGroup.LeafFunction << " Importance: " << ConstraintGroup.Importance << std::endl;
+      Printf("GroupId: %s LeafFunction: %s Importance: %f\n", ConstraintGroup.GroupId.c_str(), ConstraintGroup.LeafFunction.c_str(), ConstraintGroup.Importance);
+      // std::cerr << "Path: ";
+      Printf("Path: ");
       for (auto &P : ConstraintGroup.Path) {
-        std::cerr << P << " ";
+        Printf("%s ", P.c_str());
       }
-      std::cerr << std::endl;
+      Printf("\n");
     }
   }
   return response;
@@ -79,7 +85,8 @@ void ReportCorpus(std::string FuzzerName, size_t JobId, size_t JobBudget, std::s
   auto Res = Client.Post("/reportCorpus", Body.dump(), "application/json");
   if (Res) {
     if (Res->status != 200) {
-      std::cerr << "Report corpus failed: " << Res->body << std::endl;
+      // std::cerr << "Report corpus failed: " << Res->body << std::endl;
+      Printf("Report corpus failed: %s\n", Res->body.c_str());
     }
   }
 }
@@ -92,7 +99,8 @@ void Log(std::string Log) {
   auto Res = Client.Post("/log", Body.dump(), "application/json");
   if (Res) {
     if (Res->status != 200) {
-      std::cerr << "Log failed: " << Res->body << std::endl;
+      // std::cerr << "Log failed: " << Res->body << std::endl;
+      Printf("Log failed: %s\n", Res->body.c_str());
     }
   }
 }

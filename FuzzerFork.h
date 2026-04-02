@@ -260,7 +260,10 @@ public:
       FuzzJob.Cmd = Cmd;
       // if (FuzzerName == "wingfuzz") Cmd.addFlag("wingfuzz", "1");
     } else {
-      assert(AllFuzzersArgs.find(FuzzerName) != AllFuzzersArgs.end() && "Fuzzer not found");
+      if (AllFuzzersArgs.find(FuzzerName) == AllFuzzersArgs.end()) {
+        Printf("Fuzzer %s not found\n", FuzzerName.c_str());
+        exit(1);
+      }
       InitArgs = AllFuzzersArgs[FuzzerName];
       std::string TargetPath = DirPlusFile(CurrentPath, DirPlusFile(FuzzJob.FuzzerName, Target_Program));
       // 在参数列表中的第一个参数，里面带有afl-fuzz字符串的命令，都需要添加下面参数" -i FuzzJob.InputDir -o FuzzJob.CorpusDir，位置在afl-fuzz后面"
@@ -269,7 +272,7 @@ public:
         InitArgs.insert(InitArgs.begin() + 2, FuzzJob.InputDir);
         InitArgs.insert(InitArgs.begin() + 3, "-o");
         InitArgs.insert(InitArgs.begin() + 4, FuzzJob.CorpusDir);
-        printf("fuzzer name: %s\n", FuzzerName.c_str());
+        Printf("fuzzer name: %s\n", FuzzerName.c_str());
         // if ((FuzzerName != "aflfast") && (FuzzerName != "aflgo")) {
         InitArgs.insert(InitArgs.begin() + 5, "-V");
         InitArgs.insert(InitArgs.begin() + 6, FuzzJob.JobBudgetStr());
@@ -403,7 +406,8 @@ public:
   // 计算种子权重
   void CalculateSeedWeight(std::vector<TracePC::FuncInfo> &ValueFuncsList,
                            std::vector<TracePC::CoverageInfo> &CoverageInfos, std::string FuzzerName) {
-    std::cerr << "\tCalculating: Seed Weight for Fuzzer: " << FuzzerName << std::endl;
+    // std::cerr << "\tCalculating: Seed Weight for Fuzzer: " << FuzzerName << std::endl;
+    Printf("\tCalculating: Seed Weight for Fuzzer: %s\n", FuzzerName.c_str());
     double SeedWeight = 0;
     auto It = TracePC::CoverageInfo::FindByName(CoverageInfos, FuzzerName);
     if (It == CoverageInfos.end()) {
@@ -443,7 +447,7 @@ public:
   // 公式：Energy = 目标函数贡献 - 非目标函数惩罚
   // 权重：主函数(1000) | 路径函数(50~1000 靠近目标递增) | 非目标(1.0~GetWeight 用于惩罚)
   // 经过目标区域函数 → 增加能量；经过非目标函数 → 减少能量。
-  void CalculateSeedWeight(ConstraintGroup &selectedGroup,
+  void CalculateSeedWeight(ConstraintGroup &SelectedGroup,
                            std::vector<TracePC::CoverageInfo> &CoverageInfos,
                            std::string FuzzerName) {
     std::unordered_map<std::uintptr_t, double> TargetWeightMap;   // 目标函数(主+路径)，覆盖则加分
@@ -458,7 +462,7 @@ public:
     const double kPathWeightMax = 1000;
 
     std::unordered_map<std::string, double> PathFuncBaseWeight;
-    auto Path = selectedGroup.Path;
+    auto Path = SelectedGroup.Path;
     if (!Path.empty()) {
       for (size_t idx = 0; idx < Path.size(); idx++) {
         double w = kPathWeightMin + (kPathWeightMax - kPathWeightMin) *
@@ -473,7 +477,7 @@ public:
     for (const auto &Func : FuncsInfo) {
       auto FuncName = DescribePC_Mangled(Func.Id);
       double baseWeight = 0;
-      if (FuncName == selectedGroup.LeafFunction) {
+      if (FuncName == SelectedGroup.LeafFunction) {
         baseWeight = 1000;
       } else {
         auto it = PathFuncBaseWeight.find(FuncName);
@@ -522,11 +526,14 @@ public:
         minEnergy = SI->Energy;
     }
 
-    std::cerr << "\t[Constraint] main=" << selectedGroup.LeafFunction << " targetFuncs=" << TargetWeightMap.size()
-              << " nonTargetFuncs=" << NonTargetWeightMap.size() << " liveSeeds=" << liveCount;
-    if (liveCount > 0)
-      std::cerr << " EnergyRange=[" << minEnergy << "," << maxEnergy << "]";
-    std::cerr << std::endl;
+    // std::cerr << "\t[Constraint] main=" << SelectedGroup.LeafFunction << " targetFuncs=" << TargetWeightMap.size()
+    //           << " nonTargetFuncs=" << NonTargetWeightMap.size() << " liveSeeds=" << liveCount;
+    Printf("\t[Constraint] main=%s targetFuncs=%d nonTargetFuncs=%d liveSeeds=%d\n",
+           SelectedGroup.LeafFunction.c_str(), TargetWeightMap.size(), NonTargetWeightMap.size(), liveCount);
+    
+    if (liveCount > 0) {
+      Printf("EnergyRange=[%.2f, %.2f]\n", minEnergy, maxEnergy);
+    }
   }
   // 根据种子选择次数和种子权重计算种子得分
   void CalculateSeedScore(double Explore) {
@@ -551,12 +558,12 @@ public:
 
   std::vector<SeedInfo *> GetJobSeedsConstraint(size_t SeedsNum, const std::string &FuzzerName, Random &Rand,
                                                 std::vector<TracePC::CoverageInfo> &CoverageInfos, double Explore,
-                                                ConstraintGroup &selectedGroup) {
+                                                ConstraintGroup &SelectedGroup) {
     // std::cout << "Getting Job Seeds for Fuzzer: " << FuzzerName << " with Seed Number: " << SeedsNum << std::endl;
     std::vector<SeedInfo *> SortedSeeds;
     std::vector<SeedInfo *> JobSeeds;
 
-    CalculateSeedWeight(selectedGroup, CoverageInfos, FuzzerName);
+    CalculateSeedWeight(SelectedGroup, CoverageInfos, FuzzerName);
     CalculateSeedScore(Explore); // UCB1：平衡 Energy 与 Selections，多次选取的种子得分降低
     for (auto SI : Inputs) {
       if (SI->Live)
@@ -582,7 +589,8 @@ public:
       JobSeeds.push_back(Candidates[i]);
     }
     if (JobSeeds.size() < SeedsNum && !SortedSeeds.empty()) {
-      std::cerr << "No enough constraint seeds, filling with SkewTowardsLast." << std::endl;
+      // std::cerr << "No enough constraint seeds, filling with SkewTowardsLast." << std::endl;
+      Printf("No enough constraint seeds, filling with SkewTowardsLast.\n");
       size_t needed = SeedsNum - JobSeeds.size();
       size_t filled = 0;
       for (size_t retries = 0; filled < needed && retries < 3 * SortedSeeds.size(); retries++) {
@@ -629,7 +637,8 @@ public:
       JobSeeds.push_back(SortedSeeds[Index]);
     }
     if (JobSeeds.size() < SeedsNum && !SortedSeeds.empty()) {
-      std::cerr << "No enough UCB1 seeds selected, filling with SkewTowardsLast." << std::endl;
+      // std::cerr << "No enough UCB1 seeds selected, filling with SkewTowardsLast." << std::endl;
+      Printf("No enough UCB1 seeds selected, filling with SkewTowardsLast.\n");
       size_t needed = SeedsNum - JobSeeds.size();
       for (size_t i = 0; i < needed; i++) {
         size_t Index = Rand.SkewTowardsLast(SortedSeeds.size());
@@ -675,7 +684,8 @@ public:
       JobSeeds.push_back(SortedSeeds[Index]);
     }
     if (JobSeeds.size() < SeedsNum && !SortedSeeds.empty()) {
-      std::cerr << "No enough newest seeds selected, filling with SkewTowardsLast." << std::endl;
+      // std::cerr << "No enough newest seeds selected, filling with SkewTowardsLast." << std::endl;
+      Printf("No enough newest seeds selected, filling with SkewTowardsLast.\n");
       size_t needed = SeedsNum - JobSeeds.size();
       for (size_t i = 0; i < needed; i++) {
         size_t Index = Rand.SkewTowardsLast(SortedSeeds.size());

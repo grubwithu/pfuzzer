@@ -128,7 +128,8 @@ public:
   };
 
   size_t CalculateFuncsAverageHits(std::vector<CoverageInfo> &CoverageInfos, std::string FuzzerName) {
-    std::cerr << "\tCalculating: Functions Average Hits for Fuzzer: " << FuzzerName << std::endl;
+    // std::cerr << "\tCalculating: Functions Average Hits for Fuzzer: " << FuzzerName << std::endl;
+    Printf("\tCalculating: Functions Average Hits for Fuzzer: %s\n", FuzzerName.c_str());
     auto It = CoverageInfo::FindByName(CoverageInfos, FuzzerName);
     // 如果这里没找到对应FuzzerName的CoverageInfo，则返回第一个CoverageInfo的FuncsInfo的平均值，即global average hits
     if (It == CoverageInfos.end()) {
@@ -147,7 +148,8 @@ public:
         FuncCount++;
       }
     }
-    std::cerr << "\tCalculating:Total Hits: " << TotalHits << " Function Count: " << FuncCount << std::endl;
+    // std::cerr << "\tCalculating:Total Hits: " << TotalHits << " Function Count: " << FuncCount << std::endl;
+    Printf("\tCalculating:Total Hits: %zu Function Count: %zu\n", TotalHits, FuncCount);
     return FuncCount > 0 ? TotalHits / FuncCount : 0;
   }
 

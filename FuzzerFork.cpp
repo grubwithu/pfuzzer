@@ -18,6 +18,7 @@
 #include "FuzzerTracePC.h"
 #include "FuzzerUtil.h"
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <condition_variable>
 #include <fstream>
@@ -107,6 +108,70 @@ struct GlobalEnv {
     }
   }
 
+  std::string SelectFuzzerByScores(
+      const ConstraintGroup &SelectedGroup,
+      const std::unordered_map<std::string, ConstraintScore> &FuzzerScores) {
+    std::string FuzzerName;
+    assert(!FuzzerScores.empty());
+    
+    // 计算每个fuzzer与selectedGroup的内积
+    std::vector<std::pair<std::string, double>> fuzzerScores;
+    for (const auto &fuzzerEntry : FuzzerScores) {
+      const std::string &fuzzerName = fuzzerEntry.first;
+      const auto &fuzzerConstraints = fuzzerEntry.second;
+
+      // 计算内积
+      double dotProduct = 0.0;
+      for (const auto &groupConstraint : SelectedGroup.ConstraintScore) {
+        const auto &constraintName = groupConstraint.first;
+        const auto &groupScore = groupConstraint.second;
+
+        if (fuzzerConstraints.find(constraintName) != fuzzerConstraints.end()) {
+          const auto &fuzzerScore = fuzzerConstraints.at(constraintName);
+          dotProduct += groupScore * fuzzerScore;
+        }
+      }
+
+      fuzzerScores.push_back({fuzzerName, dotProduct});
+    }
+
+    // 计算选择概率（基于内积值）
+    double sumScores = 0.0;
+    for (const auto &entry : fuzzerScores) {
+      sumScores += entry.second;
+    }
+
+    if (sumScores > 0) {
+      // 生成随机数
+      double randomValue = Rand->Rand<int>() % 1000 / 1000.0;
+      double cumulativeProbability = 0.0;
+
+      // 根据概率选择fuzzer
+      for (const auto &entry : fuzzerScores) {
+        const std::string &fuzzerName = entry.first;
+        double score = entry.second;
+        double probability = score / sumScores;
+
+        cumulativeProbability += probability;
+        if (randomValue <= cumulativeProbability) {
+          FuzzerName = fuzzerName;
+          break;
+        }
+      }
+
+      // 如果没有选中（理论上不会发生），默认选择第一个
+      if (FuzzerName.empty() && !fuzzerScores.empty()) {
+        FuzzerName = fuzzerScores[0].first;
+      }
+    } else if (!fuzzerScores.empty()) {
+      // 如果所有内积都是0，随机选择一个
+      size_t randomIndex = Rand->Rand<int>() % fuzzerScores.size();
+      FuzzerName = fuzzerScores[randomIndex].first;
+    }
+
+    return FuzzerName;
+  }
+
   FuzzJob *CreateNewJob(size_t JobId, GlobalCorpusInfo *GlobalCorpus, std::vector<TracePC::CoverageInfo> *CoverageInfos, ArgsInfo *AllArgsInfo) {
 
     while (!Ready()) {
@@ -128,73 +193,22 @@ struct GlobalEnv {
     size_t CurFuzzerStrategy = GetCurStrategy(FuzzerStrategy, PassedMinutes);
 
     std::string FuzzerName = "";
-    ConstraintGroup selectedGroup;
+    ConstraintGroup SelectedGroup;
     if (CurSeedStrategy & SEED_STRATEGY_CORPUS || CurFuzzerStrategy & FUZZER_STRATEGY_CORPUS) {
       // Get recommended function name from hfc.
       auto PeekResultResponse = PeekResult();
-      selectedGroup = PeekResultResponse->ConstraintGroup;
+      SelectedGroup = PeekResultResponse->ConstraintGroup;
       auto &FuzzerScores = PeekResultResponse->FuzzerScores;
 
       if (CurFuzzerStrategy & FUZZER_STRATEGY_CORPUS) {
-        // Select A Fuzzer
         if (!FuzzerScores.empty()) {
-          // 计算每个fuzzer与selectedGroup的内积
-          std::vector<std::pair<std::string, double>> fuzzerScores;
-          for (const auto &fuzzerEntry : FuzzerScores) {
-            const std::string &fuzzerName = fuzzerEntry.first;
-            const auto &fuzzerConstraints = fuzzerEntry.second;
-            
-            // 计算内积
-            double dotProduct = 0.0;
-            for (const auto &groupConstraint : selectedGroup.ConstraintScore) {
-              const auto &constraintName = groupConstraint.first;
-              const auto &groupScore = groupConstraint.second;
-              
-              if (fuzzerConstraints.find(constraintName) != fuzzerConstraints.end()) {
-                const auto &fuzzerScore = fuzzerConstraints.at(constraintName);
-                dotProduct += groupScore * fuzzerScore;
-              }
-            }
-            
-            fuzzerScores.push_back({fuzzerName, dotProduct});
-          }
-          
-          // 计算选择概率（基于内积值）
-          double sumScores = 0.0;
-          for (const auto &entry : fuzzerScores) {
-            sumScores += entry.second;
-          }
-          
-          if (sumScores > 0) {
-            // 生成随机数
-            double randomValue = Rand->Rand<int>() % 1000 / 1000.0;
-            double cumulativeProbability = 0.0;
-            
-            // 根据概率选择fuzzer
-            for (const auto &entry : fuzzerScores) {
-              const std::string &fuzzerName = entry.first;
-              double score = entry.second;
-              double probability = score / sumScores;
-              
-              cumulativeProbability += probability;
-              if (randomValue <= cumulativeProbability) {
-                FuzzerName = fuzzerName;
-                break;
-              }
-            }
-            
-            // 如果没有选中（理论上不会发生），默认选择第一个
-            if (FuzzerName.empty() && !fuzzerScores.empty()) {
-              FuzzerName = fuzzerScores[0].first;
-            }
-          } else if (!fuzzerScores.empty()) {
-            // 如果所有内积都是0，随机选择一个
-            size_t randomIndex = Rand->Rand<int>() % fuzzerScores.size();
-            FuzzerName = fuzzerScores[randomIndex].first;
-          }
+          FuzzerName = SelectFuzzerByScores(SelectedGroup, FuzzerScores);
+        }
+        // Last check: if fuzzername is empty, downgrade fuzzer strategy to random
+        if (FuzzerName.empty()) {
+          CurFuzzerStrategy = FUZZER_STRATEGY_UCB1;
         }
       }
-      
     }
 
     // 加锁 Question: Why do we need to lock here?
@@ -235,7 +249,7 @@ struct GlobalEnv {
         JobSeeds = GlobalCorpus->GetJobSeedsUCB1(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0);
         break;
       case SEED_STRATEGY_CORPUS:
-        JobSeeds = GlobalCorpus->GetJobSeedsConstraint(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0, selectedGroup);
+        JobSeeds = GlobalCorpus->GetJobSeedsConstraint(SeedsNum, FuzzerName, *Rand, *CoverageInfos, 1.0, SelectedGroup);
         break;
       default:
         Printf("ERROR: SeedStrategy %d is not supported\n", CurSeedStrategy);
