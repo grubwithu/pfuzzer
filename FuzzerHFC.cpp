@@ -36,12 +36,18 @@ std::unique_ptr<PeekResultResponce> PeekResult() {
     if (!JsonRes.contains("data") || !JsonRes["data"].contains("plugin_results")) {
       // std::cerr << "peekResult reponse body is not valid, please check hfc is running correctly." << std::endl;
       Printf("peekResult reponse body is not valid, please check hfc is running correctly.\n");
+      return nullptr;
     }
     auto &PluginResults = JsonRes["data"]["plugin_results"];
     
     // 处理 fuzzer_scores
-    if (PluginResults.contains("fuzzer") && PluginResults["fuzzer"].contains("fuzzer_scores")) {
-      FuzzerScores = PluginResults["fuzzer"]["fuzzer_scores"];
+    if (PluginResults.contains("fuzzer")) {
+      if (PluginResults["fuzzer"].contains("fuzzer_scores")) {
+        FuzzerScores = PluginResults["fuzzer"]["fuzzer_scores"];
+      }
+      if (PluginResults["fuzzer"].contains("selected_fuzzer")) {
+        response->SelectedFuzzer = PluginResults["fuzzer"]["selected_fuzzer"];
+      }
     }
     
     // 处理 constraint_group
