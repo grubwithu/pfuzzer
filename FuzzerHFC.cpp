@@ -40,7 +40,7 @@ std::unique_ptr<PeekResultResponce> PeekResult() {
     }
     auto &PluginResults = JsonRes["data"]["plugin_results"];
     
-    // 处理 fuzzer_scores
+    // handle fuzzer_scores
     if (PluginResults.contains("fuzzer")) {
       if (PluginResults["fuzzer"].contains("fuzzer_scores")) {
         FuzzerScores = PluginResults["fuzzer"]["fuzzer_scores"];
@@ -50,7 +50,7 @@ std::unique_ptr<PeekResultResponce> PeekResult() {
       }
     }
     
-    // 处理 constraint_group
+    // handle constraint_group
     if (PluginResults.contains("seed") && PluginResults["seed"].contains("constraint_group")) {
       auto &Group = PluginResults["seed"]["constraint_group"];
       ConstraintGroup.GroupId = Group["group_id"];
@@ -73,6 +73,13 @@ std::unique_ptr<PeekResultResponce> PeekResult() {
         Printf("%s ", P.c_str());
       }
       Printf("\n");
+    }
+
+    // handle dict
+    if (PluginResults.contains("dict") && PluginResults["dict"].contains("content")) {
+      std::string DictContent = PluginResults["dict"]["content"];
+      response->DictContent = DictContent;
+      Printf("Dict file size: %d\n\n", DictContent.size());
     }
   }
   return response;

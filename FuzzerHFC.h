@@ -30,6 +30,7 @@ struct PeekResultResponce {
   ConstraintGroup ConstraintGroup;
   std::unordered_map<std::string, ConstraintScore> FuzzerScores;
   std::string SelectedFuzzer;
+  std::string DictContent;
 };
 
 std::unique_ptr<PeekResultResponce> PeekResult();

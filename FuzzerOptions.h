@@ -89,6 +89,7 @@ struct FuzzingOptions {
   size_t SeedStrategy = 0;
   size_t FuzzerStrategy = 0;
   size_t StrategyThreshold = 120;
+  bool UseOrchestraDict = false;
 };
 
 } // namespace fuzzer

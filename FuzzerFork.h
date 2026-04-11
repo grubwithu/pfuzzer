@@ -139,6 +139,7 @@ struct FuzzJob {
   std::string CFPath;
   size_t JobId;
   std::string StopFile;
+  std::string DictPath;
   // int         DftTimeInSeconds = 0;
   std::vector<uint32_t> NewCov;
   std::vector<uintptr_t> NewFuncs;
@@ -156,6 +157,7 @@ struct FuzzJob {
     RemoveFile(SeedListPath);
     // RmDirRecursive(CorpusDir);
     RmDirRecursive(FeaturesDir);
+    RemoveFile(DictPath);
   }
 };
 
@@ -209,7 +211,7 @@ public:
         {"eclipser", {"dotnet", CurrentPath + "/eclipser/Eclipser/build/Eclipser.dll", "--arg foo -f foo --noforkserver", "--exectimeout 10000", "-v 2 "}}};
   }
 
-  void GetFuzzerCmd(const std::string &FuzzerName, FuzzJob &FuzzJob, std::vector<std::string> &Args, const std::vector<std::string> &CorpusDirs, std::string TempDir) {
+  void GetFuzzerCmd(const std::string &FuzzerName, FuzzJob &FuzzJob, std::vector<std::string> &Args, const std::vector<std::string> &CorpusDirs, std::string TempDir, const std::string &DictPath) {
     std::vector<std::string> InitArgs;
     if (FuzzerName == "libfuzzer" || FuzzerName == "entropic" || FuzzerName == "wingfuzz") {
       InitArgs = Args;
@@ -233,6 +235,9 @@ public:
       Cmd.addFlag("print_funcs", "0"); // no need to spend time symbolizing.
       Cmd.addFlag("max_total_time", FuzzJob.JobBudgetStr());
       Cmd.addFlag("stop_file", FuzzJob.StopFile);
+      if (!DictPath.empty()) {
+        Cmd.addFlag("dict", DictPath);
+      }
       if (FuzzerName == "entropic")
         Cmd.addFlag("entropic", "1");
       std::string Seeds;
@@ -261,7 +266,7 @@ public:
       // if (FuzzerName == "wingfuzz") Cmd.addFlag("wingfuzz", "1");
     } else {
       if (AllFuzzersArgs.find(FuzzerName) == AllFuzzersArgs.end()) {
-        Printf("Fuzzer %s not found\n", FuzzerName.c_str());
+        Printf("Fatal Error: Fuzzer %s not found\n", FuzzerName.c_str());
         exit(1);
       }
       InitArgs = AllFuzzersArgs[FuzzerName];
@@ -277,7 +282,11 @@ public:
         InitArgs.insert(InitArgs.begin() + 5, "-V");
         InitArgs.insert(InitArgs.begin() + 6, FuzzJob.JobBudgetStr());
         // }
-
+        if (!DictPath.empty()) {
+          InitArgs.insert(InitArgs.begin() + 7, "-x");
+          InitArgs.insert(InitArgs.begin() + 8, DictPath);
+        }
+        
         // 最后一个参数，输入binary路径
         InitArgs.push_back(TargetPath);
         InitArgs.push_back("2147483647");

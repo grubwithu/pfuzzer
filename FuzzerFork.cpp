@@ -73,6 +73,7 @@ struct GlobalEnv {
   size_t SeedStrategy = 0;
   size_t FuzzerStrategy = 0;
   size_t StrategyThreshold = 120;
+  bool UseOrchestraDict = false;
   // 输出一些信息到本地文本文件中
   std::string LogPath;
 
@@ -143,6 +144,13 @@ struct GlobalEnv {
       if (CurFuzzerStrategy & FUZZER_STRATEGY_CORPUS && FuzzerName == "") { // Downgrade to UCB1
         CurFuzzerStrategy = FUZZER_STRATEGY_UCB1;
       }
+
+      if (UseOrchestraDict) {
+        // Create dict file
+        auto DictPath = DirPlusFile(TempDir, std::to_string(JobId) + ".dict");
+        WriteToFile(PeekResultResponse->DictContent, DictPath);
+        Job->DictPath = DictPath;
+      }
     }
 
     // 加锁 Question: Why do we need to lock here?
@@ -203,9 +211,9 @@ struct GlobalEnv {
     }
     CopyMultipleFiles(JobSeeds, Job->InputDir);
 
-    ReportCorpus(Job->FuzzerName, JobId, JobBudget, "begin", {Job->InputDir}); // TODO: Budget JobID
+    ReportCorpus(Job->FuzzerName, JobId, JobBudget, "begin", {Job->InputDir});
 
-    AllArgsInfo->GetFuzzerCmd(FuzzerName, *Job, Args, CorpusDirs, TempDir); // Dict
+    AllArgsInfo->GetFuzzerCmd(FuzzerName, *Job, Args, CorpusDirs, TempDir, Job->DictPath);
     // Print Job INFO :JobId Job->FuzzerName Jobseeds num , jobbudget JobInput JobcORPUS
     Printf("\tCreateNewJob Done: JobId: %zd, FuzzerName: %s, JobSeedsNum: %zd, JobBudget: %s, JobInput: %s, JobCorpus: %s\n",
            JobId, Job->FuzzerName.c_str(), JobSeeds.size(), Job->JobBudgetStr().c_str(), Job->InputDir.c_str(), Job->CorpusDir.c_str());
@@ -488,6 +496,7 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
   Env.SeedStrategy = Options.SeedStrategy;
   Env.FuzzerStrategy = Options.FuzzerStrategy;
   Env.StrategyThreshold = Options.StrategyThreshold;
+  Env.UseOrchestraDict = Options.UseOrchestraDict;
   // 我想用一个Vector来存在全局的CoverageInfo和每个fuzzer的CoverageInfo
   std::vector<TracePC::CoverageInfo> CoverageInfos;
   if (Fuzzers.size() > 1) {
