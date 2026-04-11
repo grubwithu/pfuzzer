@@ -145,7 +145,7 @@ struct GlobalEnv {
         CurFuzzerStrategy = FUZZER_STRATEGY_UCB1;
       }
 
-      if (UseOrchestraDict) {
+      if (UseOrchestraDict && !PeekResultResponse->DictContent.empty()) {
         // Create dict file
         auto DictPath = DirPlusFile(TempDir, std::to_string(JobId) + ".dict");
         WriteToFile(PeekResultResponse->DictContent, DictPath);
