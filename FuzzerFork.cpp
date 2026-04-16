@@ -56,6 +56,8 @@ struct GlobalEnv {
   std::vector<std::size_t> FilesSizes;
   Random *Rand;
   std::chrono::system_clock::time_point ProcessStartTime;
+  std::chrono::system_clock::time_point NextReportTime;
+
   int Verbosity = 0;
   int Group = 0;
   int NumCorpuses = 8;
@@ -124,7 +126,7 @@ struct GlobalEnv {
     Job->JobId = JobId;
 
     auto CurTime = std::chrono::system_clock::now();
-    auto PassedMinutes = std::chrono::duration_cast<std::chrono::minutes>(CurTime - ProcessStartTime).count();
+    auto PassedMinutes = secondsSinceProcessStartUp() / 60;
 
     size_t CurSeedStrategy = GetCurStrategy(SeedStrategy, PassedMinutes);
     size_t CurFuzzerStrategy = GetCurStrategy(FuzzerStrategy, PassedMinutes);
@@ -478,6 +480,7 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
   Env.Callback = Callback;
   Env.Verbosity = Options.Verbosity;
   Env.ProcessStartTime = std::chrono::system_clock::now();
+  Env.NextReportTime = Env.ProcessStartTime + std::chrono::minutes(30);
   // Env.DataFlowBinary = Options.CollectDataFlow;
   Env.Group = Options.ForkCorpusGroups;
   // Fuzzers preprocess
@@ -690,6 +693,13 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
       Env.RunOneMergeJob(Job, &CoverageInfos, GlobalCorpus);
       delete Job;
     }).detach();
+
+    auto CurTime = std::chrono::system_clock::now();
+    if (CurTime >= Env.NextReportTime) {
+      Env.NextReportTime = CurTime + std::chrono::minutes(30);
+      // Periodically report global corpus to HFC
+      ReportCorpus("global", 0, 0, "summary", {Env.MainCorpusDir});
+    }
 
     // Generate code: thread to create new job.
     std::thread([&FuzzQ, &Env, &JobId, &CoverageInfos, &GlobalCorpus, &AllArgsInfo] {
