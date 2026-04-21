@@ -813,10 +813,10 @@ std::string GetLocalCorpusDir(const std::string &CorpusDir, const std::string &F
   std::string OutputDir;
   if (FuzzerName == "libfuzzer" || FuzzerName == "entropic" || FuzzerName == "wingfuzz" || FuzzerName == "honggfuzz") {
     OutputDir = CorpusDir;
-  } else if (FuzzerName == "symcc" || FuzzerName == "aflplusplus" || FuzzerName == "radamsa" || FuzzerName == "mopt" || FuzzerName == "lafintel" || FuzzerName == "redqueen" || FuzzerName == "hastefuzz") {
+  } else if (FuzzerName == "symcc" || FuzzerName == "aflplusplus" || FuzzerName == "radamsa" || FuzzerName == "lafintel" || FuzzerName == "redqueen" || FuzzerName == "hastefuzz") {
     OutputDir = CorpusDir + "/default/queue";
   } // 增加darwin,ecofuzz,fafuzz,learnperffuzz,neuzz
-  else if (FuzzerName == "afl" || FuzzerName == "aflfast" || FuzzerName == "aflgo" || FuzzerName == "fairfuzz" || FuzzerName == "darwin" || FuzzerName == "ecofuzz" || FuzzerName == "fafuzz" || FuzzerName == "moptbk" || FuzzerName == "weizz") {
+  else if (FuzzerName == "afl" || FuzzerName == "aflfast" || FuzzerName == "aflsmart" || FuzzerName == "aflgo" || FuzzerName == "fairfuzz" || FuzzerName == "darwin" || FuzzerName == "ecofuzz" || FuzzerName == "fafuzz" || FuzzerName == "mopt" || FuzzerName == "weizz") {
     OutputDir = CorpusDir + "/queue";
   } else {
     Printf("Unknown fuzzer: %s\n", FuzzerName.c_str());
