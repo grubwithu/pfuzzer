@@ -189,11 +189,11 @@ public:
         {"symcc", {CurrentPath + "/symcc/afl-fuzz", "-p", "explore", "-t", "1000+", "-L", "-1", "-c", CurrentPath + "/aflplusplus/cmplog/" + Target_Program, "-l", "2AT"}},
         {"redqueen", {CurrentPath + "/aflplusplus/afl-fuzz", "-p", "explore", "-t", "1000+", "-c", CurrentPath + "/aflplusplus/cmplog/" + Target_Program, "-l", "1AT"}},
         {"lafintel", {CurrentPath + "/aflplusplus/afl-fuzz", "-p", "explore", "-t", "1000+", "-l", "2AT"}},
-        {"mopt", {CurrentPath + "/aflplusplus/afl-fuzz", "-p", "explore", "-t", "1000+", "-L", "0", "-c", CurrentPath + "/aflplusplus/cmplog/" + Target_Program, "-l", "2AT"}},
+        // {"mopt", {CurrentPath + "/aflplusplus/afl-fuzz", "-p", "explore", "-t", "1000+", "-L", "0", "-c", CurrentPath + "/aflplusplus/cmplog/" + Target_Program, "-l", "2AT"}},
         {"radamsa", {CurrentPath + "/radamsa/afl-fuzz", "-p", "explore", "-t", "1000+", "-L", "-1", "-c", CurrentPath + "/aflplusplus/cmplog/" + Target_Program, "-l", "2AT"}},
         {"aflsmart", {CurrentPath + "/aflsmart/afl-fuzz", "-m", "none", "-t", "1000+", "-d"}},
         {"darwin", {CurrentPath + "/darwin/afl-fuzz", "-m", "none", "-t", "1000+"}},
-        {"moptbk", {CurrentPath + "/mopt/afl-fuzz", "-m", "none", "-d", "-t", "1000+", "-L", "0"}},
+        {"mopt", {CurrentPath + "/mopt/afl-fuzz", "-m", "none", "-d", "-t", "1000+", "-L", "0"}},
         {"ecofuzz", {CurrentPath + "/ecofuzz/afl-fuzz", "-m", "none", "-t", "1000+", "-d"}},
         {"fafuzz", {CurrentPath + "/fafuzz/afl-fuzz", "-m", "none", "-t", "1000+", "-d"}},
         {"fairfuzz", {CurrentPath + "/fairfuzz/afl-fuzz", "-m", "none", "-d", "-t", "1000+"}},
@@ -219,13 +219,14 @@ public:
         std::string TargetPath = DirPlusFile(CurrentPath, DirPlusFile(FuzzJob.FuzzerName, Target_Program));
         InitArgs[0] = TargetPath;
       }
-      if (FuzzerName == "libfuzzer") {
+      if (FuzzerName == "libfuzzer" || FuzzerName == "entropic") {
         std::string TargetPath = DirPlusFile(CurrentPath, Target_Program);
         InitArgs[0] = TargetPath;
       }
       Command Cmd(InitArgs);
       Cmd.removeFlag("fork");
       Cmd.removeFlag("runs");
+      Cmd.removeFlag("entropic");
       for (auto &C : CorpusDirs) // Remove all corpora from the args.
         Cmd.removeArgument(C);
       Cmd.addFlag("reload", "0"); // working in an isolated dir, no reload.
@@ -240,6 +241,8 @@ public:
       }
       if (FuzzerName == "entropic")
         Cmd.addFlag("entropic", "1");
+      else
+        Cmd.addFlag("entropic", "0");
       std::string Seeds;
       for (auto &Seed : FuzzJob.JobSeeds) {
         Seeds += (Seeds.empty() ? "" : ",") + Seed->FilePath;
