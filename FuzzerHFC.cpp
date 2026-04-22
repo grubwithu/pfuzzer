@@ -27,12 +27,8 @@ std::unique_ptr<PeekResultResponce> PeekResult() {
   auto response = std::make_unique<PeekResultResponce>();
   auto &ConstraintGroup = response->ConstraintGroup;
   auto &FuzzerScores = response->FuzzerScores;
-  if (Res) {
-    if (Res->status != 200) {
-      // std::cerr << "Recommend function failed: " << Res->body << std::endl;
-      Printf("Recommend function failed: %s\n", Res->body.c_str());
-    }
-    auto JsonRes = json::parse(Res->body);
+  if (Res && Res->status == 200 && !Res->body.empty()) {
+    auto JsonRes = json::parse(Res->body, nullptr, false);
     if (!JsonRes.contains("data") || !JsonRes["data"].contains("plugin_results")) {
       // std::cerr << "peekResult reponse body is not valid, please check hfc is running correctly." << std::endl;
       Printf("peekResult reponse body is not valid, please check hfc is running correctly.\n");
