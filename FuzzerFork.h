@@ -155,7 +155,7 @@ struct FuzzJob {
     RemoveFile(CFPath);
     // RemoveFile(LogPath);
     RemoveFile(SeedListPath);
-    RmDirRecursive(CorpusDir);
+    // RmDirRecursive(CorpusDir);
     RmDirRecursive(FeaturesDir);
     RemoveFile(DictPath);
   }
