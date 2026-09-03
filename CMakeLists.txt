@@ -29,6 +29,7 @@ set(SRC_FILES
   FuzzerInterceptors.cpp
   FuzzerMain.cpp
   FuzzerHFC.cpp
+  FuzzerOrchestra.cpp
 )
 
 set(CMAKE_CXX_STANDARD 17)

@@ -1,3 +1,8 @@
+// DEPRECATED: V1-signature compatibility surface. pfuzzer's FuzzerFork.cpp
+// calls these entry points; this header keeps their declarations unchanged so
+// the submodule compiles untouched, while FuzzerHFC.cpp delegates to the V2
+// client in FuzzerOrchestra.{h,cpp} over /v2/*. Retained one release cycle
+// (CONTRACTS.md §11).
 #pragma one
 #ifndef FUZZER_HFC_H
 #define FUZZER_HFC_H

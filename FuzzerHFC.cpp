@@ -1,129 +1,123 @@
+// DEPRECATED compatibility shim: implements the V1-signature entry points
+// that pfuzzer's FuzzerFork.cpp calls, delegating to the V2 client in
+// FuzzerOrchestra.{h,cpp} over /v2/*. Retained one release cycle
+// (CONTRACTS.md §11).
+//
+// Mapping (FuzzerFork.cpp call sites → V2 endpoints):
+//   Ready()                          → GET  /v2/health
+//   PeekResult()                     → GET  /v2/frontiers/active
+//                                      (+ GET /v2/dictionary for DictContent)
+//   ReportCorpus(..., "begin"/"end"/
+//                "summary", {dirs})  → POST /v2/corpus/add per file via
+//                                      inline seed_data bytes; fork-mode temp
+//                                      files are transient, so a shared path
+//                                      cannot be replayed after the fork
+//                                      child exits. The server's at-most-once
+//                                      store makes repeat reports cheap.
+//   Log(...)                         → engine-local Printf (no V2 endpoint)
+//
+// V1 concepts with no V2 equivalent:
+//   SelectedFuzzer stays empty → FuzzerFork downgrades to its UCB1 engine
+//   strategy; engine selection is owned by pfuzzer (DESIGN.md §6).
+//   Root-to-leaf Path and per-fuzzer ConstraintScore stay empty; V2 carries
+//   the frontier key and a frontier-level score.
 #include "FuzzerHFC.h"
-#include "nlohmann/json.hpp" 
+#include "FuzzerOrchestra.h"
+
 #include "FuzzerIO.h"
+#include "nlohmann/json.hpp"
+
+#include <dirent.h>
+
+#include <fstream>
+#include <iterator>
+#include <string>
+#include <sys/stat.h>
+#include <vector>
 
 namespace fuzzer {
 
-using json = nlohmann::json;
+httplib::Client *GetHTTPClient() { return GetOrchestraClient(); }
 
-httplib::Client *GetHTTPClient() {
-  static httplib::Client *Client = nullptr;
-  if (!Client) {
-    auto HfcUrl = getenv("HFC_URL");
-    if (HfcUrl) {
-      Client = new httplib::Client(HfcUrl);
-    } else {
-      // std::cerr << "HFC_URL is not set, using localhost:8080" << std::endl;
-      Printf("HFC_URL is not set, using localhost:8080\n");
-      Client = new httplib::Client("localhost", 8080);
-    }
-  }
-  return Client;
-}
+bool Ready() { return OrchestraHealth(); }
 
 std::unique_ptr<PeekResultResponce> PeekResult() {
-  auto &Client = *GetHTTPClient();
-  auto Res = Client.Get("/peekResult");
-  auto response = std::make_unique<PeekResultResponce>();
-  auto &ConstraintGroup = response->ConstraintGroup;
-  auto &FuzzerScores = response->FuzzerScores;
-  if (Res && Res->status == 200 && !Res->body.empty()) {
-    auto JsonRes = json::parse(Res->body, nullptr, false);
-    if (!JsonRes.contains("data") || !JsonRes["data"].contains("plugin_results")) {
-      // std::cerr << "peekResult reponse body is not valid, please check hfc is running correctly." << std::endl;
-      Printf("peekResult reponse body is not valid, please check hfc is running correctly.\n");
-      return nullptr;
-    }
-    auto &PluginResults = JsonRes["data"]["plugin_results"];
-    
-    // handle fuzzer_scores
-    if (PluginResults.contains("fuzzer")) {
-      if (PluginResults["fuzzer"].contains("fuzzer_scores")) {
-        FuzzerScores = PluginResults["fuzzer"]["fuzzer_scores"];
-      }
-      if (PluginResults["fuzzer"].contains("selected_fuzzer")) {
-        response->SelectedFuzzer = PluginResults["fuzzer"]["selected_fuzzer"];
-      }
-    }
-    
-    // handle constraint_group
-    if (PluginResults.contains("seed") && PluginResults["seed"].contains("constraint_group")) {
-      auto &Group = PluginResults["seed"]["constraint_group"];
-      ConstraintGroup.GroupId = Group["group_id"];
-      ConstraintGroup.LeafFunction = Group["leaf_function"];
-      ConstraintGroup.FileName = Group["file_name"];
-      ConstraintGroup.Importance = Group["importance"];
-      // 处理 Path
-      ConstraintGroup.Path.clear();
-      for (auto &P : Group["path"]) {
-        ConstraintGroup.Path.push_back(P);
-      }
-      // 处理 ConstraintScore
-      ConstraintGroup.ConstraintScore = Group["constraint_score"];
-      // 打印信息
-      // std::cerr << "GroupId: " << ConstraintGroup.GroupId << " LeafFunction: " << ConstraintGroup.LeafFunction << " Importance: " << ConstraintGroup.Importance << std::endl;
-      Printf("GroupId: %s LeafFunction: %s Importance: %f\n", ConstraintGroup.GroupId.c_str(), ConstraintGroup.LeafFunction.c_str(), ConstraintGroup.Importance);
-      // std::cerr << "Path: ";
-      Printf("Path: ");
-      for (auto &P : ConstraintGroup.Path) {
-        Printf("%s ", P.c_str());
-      }
-      Printf("\n");
-    }
-
-    // handle dict
-    if (PluginResults.contains("dict") && PluginResults["dict"].contains("content")) {
-      std::string DictContent = PluginResults["dict"]["content"];
-      response->DictContent = DictContent;
-      Printf("Dict file size: %d\n\n", DictContent.size());
-    }
+  auto Response = std::make_unique<PeekResultResponce>();
+  auto Recs = OrchestraGetActiveFrontiers();
+  if (Recs && !Recs->Frontiers.empty()) {
+    auto &Front = Recs->Frontiers.front();
+    Response->ConstraintGroup.GroupId = Front.FrontierKey;
+    Response->ConstraintGroup.LeafFunction = Front.FrontierKey;
+    Response->ConstraintGroup.Importance = Front.Score;
+    if (!Front.RecommendedSeeds.empty())
+      Printf("Orchestra frontier %s: %zu recommended seeds\n",
+             Front.FrontierKey.c_str(), Front.RecommendedSeeds.size());
   }
-  return response;
+  // Dictionary: libFuzzer dict format, one entry per mined token.
+  auto Dict = OrchestraGetDictionary();
+  if (Dict && !Dict->Tokens.empty()) {
+    std::string Content;
+    int Idx = 1;
+    for (auto &Token : Dict->Tokens) {
+      Content += "token" + std::to_string(Idx++) + "=\"" + Token + "\"\n";
+    }
+    Response->DictContent = Content;
+  }
+  return Response;
 }
 
-void ReportCorpus(std::string FuzzerName, size_t JobId, size_t JobBudget, std::string period, std::vector<std::string> Corpus) {
-  auto &Client = *GetHTTPClient();
-  json Body = {
-      {"fuzzer", FuzzerName},
-      {"identity", FuzzerName},
-      {"job_id", JobId},
-      {"job_budget", JobBudget},
-      {"period", period},
-      {"corpus", Corpus},
-  };
-  auto Res = Client.Post("/reportCorpus", Body.dump(), "application/json");
-  if (Res) {
-    if (Res->status != 200) {
-      // std::cerr << "Report corpus failed: " << Res->body << std::endl;
-      Printf("Report corpus failed: %s\n", Res->body.c_str());
+// ListFiles returns the regular files directly inside Dir (corpora
+// directories are flat). Linux/Docker target; the shim retires after one
+// release cycle so the POSIX-only listing is acceptable.
+static std::vector<std::string> ListFiles(const std::string &Dir) {
+  std::vector<std::string> Files;
+  DIR *D = opendir(Dir.c_str());
+  if (!D)
+    return Files;
+  while (auto Entry = readdir(D)) {
+    std::string Name = Entry->d_name;
+    if (Name == "." || Name == "..")
+      continue;
+    std::string Full = Dir + "/" + Name;
+    struct stat S;
+    if (stat(Full.c_str(), &S) == 0 && S_ISREG(S.st_mode))
+      Files.push_back(Full);
+  }
+  closedir(D);
+  return Files;
+}
+
+void ReportCorpus(std::string FuzzerName, size_t JobId, size_t JobBudget,
+                  std::string period, std::vector<std::string> Corpus) {
+  (void)JobBudget; // V2 budgets are scheduler-side.
+  (void)period;    // begin/end/summary all reduce to at-most-once seed reports.
+  for (auto &Path : Corpus) {
+    for (auto &File : ListFiles(Path)) {
+      // Inline transport (seed_data): fork-mode temp files are transient —
+      // libFuzzer removes them when the process exits, so the analyzer
+      // cannot replay them through a shared path after the fork child is
+      // gone. Reading the bytes here lets the analyzer hash and measure
+      // what this engine actually reported.
+      std::ifstream In(File, std::ios::binary);
+      if (!In) {
+        Printf("Orchestra: cannot read seed %s\n", File.c_str());
+        continue;
+      }
+      std::vector<uint8_t> Bytes((std::istreambuf_iterator<char>(In)),
+                                 std::istreambuf_iterator<char>());
+      auto Res =
+          OrchestraAddCorpusData(FuzzerName, std::to_string(JobId), std::string(), Bytes, {});
+      if (Res && Res->HintDiverged) {
+        Printf("Orchestra: hint diverged for seed %s (ratio %f); keeping local bitmap\n",
+               File.c_str(), Res->DivergenceRatio);
+      }
     }
   }
 }
 
 void Log(std::string Log) {
-  auto &Client = *GetHTTPClient();
-  json Body = {
-      {"log", Log},
-  };
-  auto Res = Client.Post("/log", Body.dump(), "application/json");
-  if (Res) {
-    if (Res->status != 200) {
-      // std::cerr << "Log failed: " << Res->body << std::endl;
-      Printf("Log failed: %s\n", Res->body.c_str());
-    }
-  }
-}
-
-bool Ready() {
-  auto &Client = *GetHTTPClient();
-  auto Res = Client.Get("/ready");
-  if (Res) {
-    auto JsonRes = json::parse(Res->body);
-    if (JsonRes.contains("success") && JsonRes["success"].is_boolean()) {
-      return JsonRes["success"];  
-    }
-  }
-  return false;
+  // V2 has no log endpoint; strategy changes stay engine-local.
+  Printf("%s\n", Log.c_str());
 }
 
 } // namespace fuzzer

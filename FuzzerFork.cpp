@@ -14,6 +14,7 @@
 #include "FuzzerIO.h"
 #include "FuzzerInternal.h"
 #include "FuzzerMerge.h"
+#include "FuzzerOrchestra.h"
 #include "FuzzerSHA1.h"
 #include "FuzzerTracePC.h"
 #include "FuzzerUtil.h"
@@ -246,6 +247,11 @@ struct GlobalEnv {
     std::string LocalCorpusDir = GetLocalCorpusDir(Job->CorpusDir, Job->FuzzerName);
 
     ReportCorpus(Job->FuzzerName, Job->JobId, Job->JobBudget, "end", {LocalCorpusDir});
+
+    // Orchestra V2 coverage interval (DESIGN.md §4.5): report the job's
+    // completion as a capability observation. Observed bitmaps stay hints
+    // and never drive server-side frontier state.
+    OrchestraReportCoverage(Job->FuzzerName, std::to_string(Job->JobId), {}, {}, {});
 
     std::vector<SizedFile> LocalCorpusSeeds;
     GetSizedFilesFromDir(LocalCorpusDir, &LocalCorpusSeeds);
