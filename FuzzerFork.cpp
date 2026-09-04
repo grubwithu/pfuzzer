@@ -815,14 +815,17 @@ std::string GetLocalCorpusDir(const std::string &CorpusDir, const std::string &F
   // 如果FuzzerName是libfuzzer 或者 entropic 或者wingfuzz或者honggfuzz，OUTPUT_DIR是CorpusDir
   // 如果FuzzerName是aflplusplus 或者 radamsa 或者 mopt或者是lafintel或者 redqueen，OUTPUT_DIR是CorpusDir/default/queue
   // 如果FuzzerName是afl 或者 aflfast 或者 fairfuzz，OUTPUT_DIR是CorpusDir/queue
+  // Orchestra: modern AFL++ (the pinned OSS-Fuzz "afl" engine, 4.34a) always
+  // writes <out>/<instance>/queue with the default instance name, so "afl"
+  // reads CorpusDir/default/queue like the other AFL++-based engines.
 
   std::string OutputDir;
   if (FuzzerName == "libfuzzer" || FuzzerName == "entropic" || FuzzerName == "wingfuzz" || FuzzerName == "honggfuzz") {
     OutputDir = CorpusDir;
-  } else if (FuzzerName == "symcc" || FuzzerName == "aflplusplus" || FuzzerName == "radamsa" || FuzzerName == "lafintel" || FuzzerName == "redqueen" || FuzzerName == "hastefuzz") {
+  } else if (FuzzerName == "afl" || FuzzerName == "symcc" || FuzzerName == "aflplusplus" || FuzzerName == "radamsa" || FuzzerName == "lafintel" || FuzzerName == "redqueen" || FuzzerName == "hastefuzz") {
     OutputDir = CorpusDir + "/default/queue";
   } // 增加darwin,ecofuzz,fafuzz,learnperffuzz,neuzz
-  else if (FuzzerName == "afl" || FuzzerName == "aflfast" || FuzzerName == "aflsmart" || FuzzerName == "aflgo" || FuzzerName == "fairfuzz" || FuzzerName == "darwin" || FuzzerName == "ecofuzz" || FuzzerName == "fafuzz" || FuzzerName == "mopt" || FuzzerName == "weizz") {
+  else if (FuzzerName == "aflfast" || FuzzerName == "aflsmart" || FuzzerName == "aflgo" || FuzzerName == "fairfuzz" || FuzzerName == "darwin" || FuzzerName == "ecofuzz" || FuzzerName == "fafuzz" || FuzzerName == "mopt" || FuzzerName == "weizz") {
     OutputDir = CorpusDir + "/queue";
   } else {
     Printf("Unknown fuzzer: %s\n", FuzzerName.c_str());
