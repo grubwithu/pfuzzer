@@ -39,7 +39,13 @@ struct PeekResultResponce {
 };
 
 std::unique_ptr<PeekResultResponce> PeekResult();
-void ReportCorpus(std::string FuzzerName, size_t JobId, size_t JobBudget, std::string period, std::vector<std::string> Corpus);
+// SeedHints maps an absolute seed file path to the edge IDs the engine
+// observed while replaying that seed in-process (Orchestra edge-ID space).
+// Hints are engine observations only; the analyzer never trusts them
+// (CONTRACTS.md §10). Merge jobs pass the map; "begin"/"summary" call
+// sites pass the default empty map.
+void ReportCorpus(std::string FuzzerName, size_t JobId, size_t JobBudget, std::string period, std::vector<std::string> Corpus,
+                  const std::unordered_map<std::string, std::vector<uint32_t>> &SeedHints = {});
 void Log(std::string Log);
 bool Ready();
 

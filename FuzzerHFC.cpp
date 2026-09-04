@@ -88,7 +88,8 @@ static std::vector<std::string> ListFiles(const std::string &Dir) {
 }
 
 void ReportCorpus(std::string FuzzerName, size_t JobId, size_t JobBudget,
-                  std::string period, std::vector<std::string> Corpus) {
+                  std::string period, std::vector<std::string> Corpus,
+                  const std::unordered_map<std::string, std::vector<uint32_t>> &SeedHints) {
   (void)JobBudget; // V2 budgets are scheduler-side.
   (void)period;    // begin/end/summary all reduce to at-most-once seed reports.
   for (auto &Path : Corpus) {
@@ -105,8 +106,13 @@ void ReportCorpus(std::string FuzzerName, size_t JobId, size_t JobBudget,
       }
       std::vector<uint8_t> Bytes((std::istreambuf_iterator<char>(In)),
                                  std::istreambuf_iterator<char>());
+      std::vector<uint32_t> Hint;
+      auto It = SeedHints.find(File);
+      if (It != SeedHints.end()) {
+        Hint = It->second;
+      }
       auto Res =
-          OrchestraAddCorpusData(FuzzerName, std::to_string(JobId), std::string(), Bytes, {});
+          OrchestraAddCorpusData(FuzzerName, std::to_string(JobId), std::string(), Bytes, Hint);
       if (Res && Res->HintDiverged) {
         Printf("Orchestra: hint diverged for seed %s (ratio %f); keeping local bitmap\n",
                File.c_str(), Res->DivergenceRatio);

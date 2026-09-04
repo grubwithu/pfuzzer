@@ -22,6 +22,7 @@
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
+#include <cstring>
 #include <fstream>
 #include <memory>
 #include <mutex>
@@ -32,6 +33,18 @@
 #include <utility>
 
 namespace fuzzer {
+
+// Orchestra edge-runtime accessors (edge_runtime.c, weak): per-seed hint
+// windows for merge replay. The parent binary links the same instrumented
+// runtime as the canonical binary, so the snapshot is in the analyzer's
+// Orchestra edge-ID space. Hints are engine observations only; the analyzer
+// never trusts them (CONTRACTS.md §10). When the runtime is absent (weak
+// symbols null), hints are simply not collected.
+extern "C" {
+void __orchestra_edge_reset(void) __attribute__((weak));
+size_t __orchestra_edge_snapshot(uint32_t *out, size_t max) __attribute__((weak));
+}
+#define ORCHESTRA_HINT_BUFFER 8192
 
 static inline size_t BitCount(size_t x) {
   size_t count = 0;
@@ -246,8 +259,6 @@ struct GlobalEnv {
     }
     std::string LocalCorpusDir = GetLocalCorpusDir(Job->CorpusDir, Job->FuzzerName);
 
-    ReportCorpus(Job->FuzzerName, Job->JobId, Job->JobBudget, "end", {LocalCorpusDir});
-
     // Orchestra V2 coverage interval (DESIGN.md §4.5): report the job's
     // completion as a capability observation. Observed bitmaps stay hints
     // and never drive server-side frontier state.
@@ -257,6 +268,9 @@ struct GlobalEnv {
     GetSizedFilesFromDir(LocalCorpusDir, &LocalCorpusSeeds);
     // std::sort(LocalCorpusSeeds.begin(), LocalCorpusSeeds.end());
     std::vector<MergeSeedInfo> MergeSeedCandidates;
+    // Orchestra V2 hints: per-seed edge observations collected during the
+    // merge replay below (Orchestra edge-ID space; hint-only on the server).
+    std::unordered_map<std::string, std::vector<uint32_t>> SeedHints;
     // 找到std::vector<TracePC::CoverageInfo> *CoverageInfos中FuzzerName对应的CoverageInfo
     auto FuzzerIt = std::find_if(CoverageInfos->begin(), CoverageInfos->end(), [&](const TracePC::CoverageInfo &Info) { return Info.FuzzerName == Job->FuzzerName; });
     if (FuzzerIt == CoverageInfos->end()) {
@@ -273,6 +287,8 @@ struct GlobalEnv {
         std::vector<uintptr_t> SeedFuncs;
         std::vector<const TracePC::PCTableEntry *> SeedPCs;
         TPC.ResetMaps();
+        if (__orchestra_edge_reset)
+          __orchestra_edge_reset(); // start the per-seed hint window
         int CBRes = 0;
         auto UnitStartTime = std::chrono::system_clock::now();
         CBRes = Callback(U.data(), U.size());
@@ -280,6 +296,11 @@ struct GlobalEnv {
         assert(CBRes == 0 || CBRes == -1);
         std::chrono::microseconds TimeOfUnit = std::chrono::duration_cast<std::chrono::microseconds>(UnitEndTime - UnitStartTime);
         TPC.CollectFeatures([&](uint32_t Feature) { NewFeatures.push_back(Feature); });
+        if (__orchestra_edge_snapshot) {
+          uint32_t HintBuf[ORCHESTRA_HINT_BUFFER];
+          size_t HintN = __orchestra_edge_snapshot(HintBuf, ORCHESTRA_HINT_BUFFER);
+          SeedHints[F.File].assign(HintBuf, HintBuf + HintN);
+        }
         TPC.UpdateObservedPCs(*FuzzerIt);
         TPC.UpdateObservedPCs(*GlobalIt);
         TPC.GetSeedTrace();
@@ -308,6 +329,9 @@ struct GlobalEnv {
       TPC.GetFuncFreqsUncoveredInfo(*GlobalIt);
       TPC.GetFuncFreqsUncoveredInfo(*FuzzerIt);
     }
+    // Orchestra V2: report the merged corpus after the replay loop so the
+    // per-seed hint map is complete (hints collected during replay).
+    ReportCorpus(Job->FuzzerName, Job->JobId, Job->JobBudget, "end", {LocalCorpusDir}, SeedHints);
     // TODO
     // 1.calculate the feedback of job and fuzzer
     // 2.Merge coverage info
