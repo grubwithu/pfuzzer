@@ -66,25 +66,23 @@ std::unique_ptr<PeekResultResponce> PeekResult() {
   return Response;
 }
 
-// ListFiles returns the regular files directly inside Dir (corpora
-// directories are flat). Linux/Docker target; the shim retires after one
-// release cycle so the POSIX-only listing is acceptable.
+// ListFiles returns the regular files inside Dir, recursing into
+// subdirectories. It must match the merge loop's GetSizedFilesFromDir
+// traversal (ListFilesInDirRecursive, recursive): libFuzzer jobs write new
+// units into CorpusDir/output/, and the per-seed hint map is keyed by the
+// merge loop's paths — a flat listing would miss every hint. Linux/Docker
+// target; the shim retires after one release cycle so the POSIX-only
+// listing is acceptable.
 static std::vector<std::string> ListFiles(const std::string &Dir) {
   std::vector<std::string> Files;
-  DIR *D = opendir(Dir.c_str());
-  if (!D)
-    return Files;
-  while (auto Entry = readdir(D)) {
-    std::string Name = Entry->d_name;
-    if (Name == "." || Name == "..")
-      continue;
-    std::string Full = Dir + "/" + Name;
+  ListFilesInDirRecursive(Dir, 0, &Files, /*TopDir=*/true);
+  std::vector<std::string> Regular;
+  for (auto &F : Files) {
     struct stat S;
-    if (stat(Full.c_str(), &S) == 0 && S_ISREG(S.st_mode))
-      Files.push_back(Full);
+    if (stat(F.c_str(), &S) == 0 && S_ISREG(S.st_mode))
+      Regular.push_back(F);
   }
-  closedir(D);
-  return Files;
+  return Regular;
 }
 
 void ReportCorpus(std::string FuzzerName, size_t JobId, size_t JobBudget,
