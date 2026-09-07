@@ -223,3 +223,5 @@ FUZZER_FLAG_UNSIGNED(strategy_threshold, 360, "If there are two 1s in the binary
     "and use higher bit strategy for the rest of the time.")
 FUZZER_FLAG_UNSIGNED(orchestra_dict, 0, "If 1, use the dictionary generated from orchestra. "
     "NOTICE: -dict is disabled when pfuzzer starts with -fork and -fuzzers.")
+FUZZER_FLAG_UNSIGNED(orchestra_seed, 1, "If 1 (default), start fork jobs from the orchestra-"
+    "recommended seeds of the selected frontier; 0 keeps the local seed strategy.")

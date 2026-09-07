@@ -744,6 +744,7 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
   Options.SeedStrategy = Flags.seed_strategy;
   Options.StrategyThreshold = Flags.strategy_threshold;
   Options.UseOrchestraDict = Flags.orchestra_dict;
+  Options.OrchestraSeed = Flags.orchestra_seed;
   if (!Options.MallocLimitMb)
     Options.MallocLimitMb = Options.RssLimitMb;
   if (Flags.runs >= 0)

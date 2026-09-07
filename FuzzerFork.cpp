@@ -93,6 +93,7 @@ struct GlobalEnv {
   size_t FuzzerStrategy = 0;
   size_t StrategyThreshold = 120;
   bool UseOrchestraDict = false;
+  bool UseOrchestraSeed = true;
   // 输出一些信息到本地文本文件中
   std::string LogPath;
 
@@ -227,7 +228,7 @@ struct GlobalEnv {
     // to local files and prefer them for this job. Unresolvable hashes are
     // skipped by the shim; an empty resolution falls back to the strategy
     // picks above (CONTRACTS.md §5: Orchestra recommends, pfuzzer executes).
-    if (!PeekResultResponse->RecommendedSeedHashes.empty()) {
+    if (UseOrchestraSeed && !PeekResultResponse->RecommendedSeedHashes.empty()) {
       Job->RecommendedSeedPaths =
           ResolveSeedPaths(PeekResultResponse->RecommendedSeedHashes);
       if (!Job->RecommendedSeedPaths.empty())
@@ -558,6 +559,7 @@ void FuzzWithFork(Random &Rand, const FuzzingOptions &Options,
   Env.FuzzerStrategy = Options.FuzzerStrategy;
   Env.StrategyThreshold = Options.StrategyThreshold;
   Env.UseOrchestraDict = Options.UseOrchestraDict;
+  Env.UseOrchestraSeed = Options.OrchestraSeed;
   // 我想用一个Vector来存在全局的CoverageInfo和每个fuzzer的CoverageInfo
   std::vector<TracePC::CoverageInfo> CoverageInfos;
   if (Fuzzers.size() > 1) {
