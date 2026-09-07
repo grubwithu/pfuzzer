@@ -36,9 +36,17 @@ struct PeekResultResponce {
   std::unordered_map<std::string, ConstraintScore> FuzzerScores;
   std::string SelectedFuzzer;
   std::string DictContent;
+  // Orchestra V2: the selected frontier's recommended seed hashes (analyzer-
+  // verified SHA-256 identities). Consumed via ResolveSeedPaths into local
+  // file paths; CONTRACTS.md §5 — Orchestra recommends, pfuzzer executes.
+  std::vector<std::string> RecommendedSeedHashes;
 };
 
 std::unique_ptr<PeekResultResponce> PeekResult();
+// ResolveSeedPaths maps analyzer-verified seed hashes to local file paths
+// recorded when this process posted the corpus. Hashes with no local copy
+// (or whose file has vanished) are skipped; order follows the input.
+std::vector<std::string> ResolveSeedPaths(const std::vector<std::string> &Hashes);
 // SeedHints maps an absolute seed file path to the edge IDs the engine
 // observed while replaying that seed in-process (Orchestra edge-ID space).
 // Hints are engine observations only; the analyzer never trusts them

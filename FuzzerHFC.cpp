@@ -31,11 +31,19 @@
 
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <string>
 #include <sys/stat.h>
 #include <vector>
 
 namespace fuzzer {
+
+// Seed-hash → local file path registry. ReportCorpus records the analyzer's
+// authoritative SHA-256 for every file it posts; ResolveSeedPaths later maps
+// recommended hashes back to local copies. Merge jobs post from worker
+// threads while job creation reads on the main thread — the map is guarded.
+static std::mutex g_SeedRegistryMu;
+static std::unordered_map<std::string, std::string> g_SeedHashToPath;
 
 httplib::Client *GetHTTPClient() { return GetOrchestraClient(); }
 
@@ -49,6 +57,9 @@ std::unique_ptr<PeekResultResponce> PeekResult() {
     Response->ConstraintGroup.GroupId = Front.FrontierKey;
     Response->ConstraintGroup.LeafFunction = Front.FrontierKey;
     Response->ConstraintGroup.Importance = Front.Score;
+    // Recommended seeds: the selected (top-priority) frontier's analyzer-
+    // verified seed hashes. Job creation resolves them to local paths.
+    Response->RecommendedSeedHashes = Front.RecommendedSeeds;
     if (!Front.RecommendedSeeds.empty())
       Printf("Orchestra frontier %s: %zu recommended seeds\n",
              Front.FrontierKey.c_str(), Front.RecommendedSeeds.size());
@@ -111,12 +122,33 @@ void ReportCorpus(std::string FuzzerName, size_t JobId, size_t JobBudget,
       }
       auto Res =
           OrchestraAddCorpusData(FuzzerName, std::to_string(JobId), std::string(), Bytes, Hint);
+      // Record the analyzer's authoritative hash for this local copy so job
+      // creation can resolve recommended hashes back to files.
+      if (Res && !Res->SeedHash.empty()) {
+        std::lock_guard<std::mutex> Lock(g_SeedRegistryMu);
+        g_SeedHashToPath[Res->SeedHash] = File;
+      }
       if (Res && Res->HintDiverged) {
         Printf("Orchestra: hint diverged for seed %s (ratio %f); keeping local bitmap\n",
                File.c_str(), Res->DivergenceRatio);
       }
     }
   }
+}
+
+std::vector<std::string> ResolveSeedPaths(const std::vector<std::string> &Hashes) {
+  std::vector<std::string> Paths;
+  std::lock_guard<std::mutex> Lock(g_SeedRegistryMu);
+  for (auto &Hash : Hashes) {
+    auto It = g_SeedHashToPath.find(Hash);
+    if (It == g_SeedHashToPath.end())
+      continue;
+    struct stat S;
+    if (stat(It->second.c_str(), &S) != 0 || !S_ISREG(S.st_mode))
+      continue; // local copy vanished (e.g. merge temp dir) — skip
+    Paths.push_back(It->second);
+  }
+  return Paths;
 }
 
 void Log(std::string Log) {

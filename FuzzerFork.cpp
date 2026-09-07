@@ -46,6 +46,9 @@ size_t __orchestra_edge_snapshot(uint32_t *out, size_t max) __attribute__((weak)
 }
 #define ORCHESTRA_HINT_BUFFER 8192
 
+// Defined further down; needed by CreateNewJob's Orchestra seed branch.
+bool CopyFile(const std::string &SrcPath, const std::string &DstPath);
+
 static inline size_t BitCount(size_t x) {
   size_t count = 0;
   while (x) {
@@ -147,11 +150,16 @@ struct GlobalEnv {
 
     std::string FuzzerName = "";
     ConstraintGroup SelectedGroup;
-    if (CurSeedStrategy & SEED_STRATEGY_CORPUS || CurFuzzerStrategy & FUZZER_STRATEGY_CORPUS) {
-      // Get recommended function name from hfc.
-      auto PeekResultResponse = PeekResult();
+    // Orchestra V2: fetch recommendations once per job regardless of the
+    // seed/fuzzer strategy — recommended seeds and the dictionary are
+    // steering inputs (CONTRACTS.md §5), not CORPUS-strategy-only features.
+    // PeekResult is soft-fail: with the analyzer absent it yields an empty
+    // response and every consumer below falls back to the local strategy.
+    std::unique_ptr<PeekResultResponce> PeekResultResponse;
+    if (OrchestraEnabled() || CurSeedStrategy & SEED_STRATEGY_CORPUS ||
+        CurFuzzerStrategy & FUZZER_STRATEGY_CORPUS) {
+      PeekResultResponse = PeekResult();
       SelectedGroup = PeekResultResponse->ConstraintGroup;
-      auto &FuzzerScores = PeekResultResponse->FuzzerScores;
       FuzzerName = PeekResultResponse->SelectedFuzzer;
 
       if (CurSeedStrategy & SEED_STRATEGY_CORPUS && SelectedGroup.GroupId == "") { // Downgrade to UCB1
@@ -215,6 +223,17 @@ struct GlobalEnv {
       }
     }
     Job->JobSeeds = JobSeeds;
+    // Orchestra V2: resolve the selected frontier's recommended seed hashes
+    // to local files and prefer them for this job. Unresolvable hashes are
+    // skipped by the shim; an empty resolution falls back to the strategy
+    // picks above (CONTRACTS.md §5: Orchestra recommends, pfuzzer executes).
+    if (!PeekResultResponse->RecommendedSeedHashes.empty()) {
+      Job->RecommendedSeedPaths =
+          ResolveSeedPaths(PeekResultResponse->RecommendedSeedHashes);
+      if (!Job->RecommendedSeedPaths.empty())
+        Printf("Orchestra: job %zd frontier %s starting from %zu recommended seeds\n",
+               JobId, SelectedGroup.GroupId.c_str(), Job->RecommendedSeedPaths.size());
+    }
     Job->LogPath = DirPlusFile(TempDir, std::to_string(JobId) + ".log");
     Job->CorpusDir = DirPlusFile(TempDir, "C" + std::to_string(JobId));
     Job->InputDir = DirPlusFile(TempDir, "I" + std::to_string(JobId));
@@ -225,7 +244,16 @@ struct GlobalEnv {
       RmDirRecursive(D);
       MkDir(D);
     }
-    CopyMultipleFiles(JobSeeds, Job->InputDir);
+    if (Job->RecommendedSeedPaths.empty()) {
+      CopyMultipleFiles(JobSeeds, Job->InputDir);
+    } else {
+      // Orchestra recommended seeds: copy the resolved local files into the
+      // job's input dir (same layout CopyMultipleFiles produces).
+      for (auto &Path : Job->RecommendedSeedPaths) {
+        std::string Dest = DirPlusFile(Job->InputDir, GetBaseName(Path));
+        CopyFile(Path, Dest);
+      }
+    }
 
     ReportCorpus(Job->FuzzerName, JobId, JobBudget, "begin", {Job->InputDir});
 

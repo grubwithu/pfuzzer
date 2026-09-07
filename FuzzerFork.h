@@ -129,6 +129,11 @@ struct FuzzJob {
   Command Cmd;
   std::string FuzzerName;
   std::vector<SeedInfo *> JobSeeds;
+  // Orchestra V2: local paths for the selected frontier's recommended seeds
+  // (resolved from analyzer-verified hashes). Non-empty means the job starts
+  // from the recommended seeds instead of the strategy-picked list
+  // (CONTRACTS.md §5: Orchestra recommends, pfuzzer executes).
+  std::vector<std::string> RecommendedSeedPaths;
   std::string BinaryName;
   size_t JobBudget;
   std::string CorpusDir;
@@ -244,8 +249,16 @@ public:
       else
         Cmd.addFlag("entropic", "0");
       std::string Seeds;
-      for (auto &Seed : FuzzJob.JobSeeds) {
-        Seeds += (Seeds.empty() ? "" : ",") + Seed->FilePath;
+      if (!FuzzJob.RecommendedSeedPaths.empty()) {
+        // Orchestra recommended seeds take precedence over the strategy
+        // picks when the analyzer resolved local copies for this frontier.
+        for (auto &Path : FuzzJob.RecommendedSeedPaths) {
+          Seeds += (Seeds.empty() ? "" : ",") + Path;
+        }
+      } else {
+        for (auto &Seed : FuzzJob.JobSeeds) {
+          Seeds += (Seeds.empty() ? "" : ",") + Seed->FilePath;
+        }
       }
       if (!Seeds.empty()) {
         FuzzJob.SeedListPath = DirPlusFile(TempDir, std::to_string(FuzzJob.JobId) + ".seeds");
